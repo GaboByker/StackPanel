@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+	<meta charset="utf-8"/>
+	<meta name="viewport" content="width=device-width, initial-scale=1"/>
+	<title>Nuevo admin — Portal</title>
+	<link rel="stylesheet" href="/static/css/portal.css"/>
+</head>
+<body class="landing-page admin-page">
+	<header class="landing-topbar">
+		<div class="landing-topbar-brand">
+			<span>Nuevo administrador</span>
+		</div>
+		<nav>
+			<a href="/admin">Panel</a>
+			<a href="/admin/logout">Salir</a>
+		</nav>
+	</header>
+
+	<main class="landing-wrap admin-wrap">
+		<section class="admin-card">
+			<h1>Crear administrador</h1>
+			<p class="admin-subtitle">Solo tú (u otro admin) puede dar de alta nuevas cuentas.</p>
+
+			{% if error %}
+			<div class="alert alert-error">{{ error }}</div>
+			{% endif %}
+
+			<form method="post" class="admin-form">
+				<label for="email">Correo electrónico</label>
+				<input type="email" id="email" name="email" required autofocus/>
+
+				<label for="password">Contraseña</label>
+				<input type="password" id="password" name="password" required minlength="8"/>
+
+				<button type="submit" class="btn btn-primary">Crear administrador</button>
+			</form>
+
+			<p class="admin-footer-link"><a href="/admin">← Volver al panel</a></p>
+		</section>
+	</main>
+</body>
+</html>

@@ -1,0 +1,18 @@
+[
+  {
+    "id": "empires",
+    "name": "Empires & Allies",
+    "description": "Servidor comunitario de preservación del juego clásico con cuentas, red social y chat.",
+    "port": 5006,
+    "path": "/",
+    "icon_path": "/img/icon.png"
+  },
+  {
+    "id": "finanzas-personales",
+    "name": "Finanzas Personales",
+    "description": "Control de gastos, ingresos, deudas, tarjetas y métricas financieras personales.",
+    "port": 5050,
+    "path": "/",
+    "icon_path": null
+  }
+]

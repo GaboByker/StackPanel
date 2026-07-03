@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+	<meta charset="utf-8"/>
+	<meta name="viewport" content="width=device-width, initial-scale=1"/>
+	<title>Panel admin — Portal</title>
+	<link rel="stylesheet" href="/static/css/portal.css"/>
+</head>
+<body class="landing-page admin-page">
+	<header class="landing-topbar">
+		<div class="landing-topbar-brand">
+			<span>Panel de administración</span>
+		</div>
+		<nav>
+			<span class="admin-user">{{ current_admin.email }}</span>
+			<a href="/">Portal</a>
+			<a href="/admin/logout">Salir</a>
+		</nav>
+	</header>
+
+	<main class="landing-wrap">
+		{% with messages = get_flashed_messages(with_categories=true) %}
+			{% if messages %}
+				{% for category, message in messages %}
+				<div class="alert alert-{{ category }}">{{ message }}</div>
+				{% endfor %}
+			{% endif %}
+		{% endwith %}
+
+		<h2 class="landing-section-title">Proyectos Docker</h2>
+		<p class="admin-hint">Iniciar o detener el <strong>contenedor completo</strong> de cada proyecto (aplicación + datos). Al detener, la base de datos en disco <strong>no se borra</strong> (permanece en <code>instance/</code>).</p>
+
+		<div class="admin-services">
+			{% for svc in services %}
+			<article class="admin-service-card">
+				<div class="admin-service-head">
+					<h3>{{ svc.label }}</h3>
+					<span class="status-pill {{ 'running' if svc.running else 'stopped' }}">
+						{% if svc.running %}En marcha{% elif svc.state == 'missing' %}No encontrado{% else %}Detenido{% endif %}
+					</span>
+				</div>
+				<p><strong>Contenedor:</strong> <code>{{ svc.container }}</code></p>
+				{% if svc.port %}
+				<p><strong>Puerto:</strong> <code>{{ public_host }}:{{ svc.port }}</code></p>
+				{% endif %}
+				<p><strong>Estado Docker:</strong> <code>{{ svc.state }}</code></p>
+				<p><strong>Datos persistentes:</strong> <code>{{ svc.database }}</code></p>
+				{% if svc.error %}
+				<p class="admin-service-error"><strong>Aviso:</strong> {{ svc.error }}</p>
+				{% endif %}
+				<div class="admin-actions">
+					{% if svc.running %}
+					<form method="post" action="/admin/containers/{{ svc.key }}/stop" onsubmit="return confirm('¿Detener {{ svc.label }}? La aplicación dejará de responder; los datos en disco se conservan.');">
+						<button type="submit" class="btn btn-danger">Detener proyecto</button>
+					</form>
+					{% else %}
+					<form method="post" action="/admin/containers/{{ svc.key }}/start">
+						<button type="submit" class="btn btn-primary">Iniciar proyecto</button>
+					</form>
+					{% endif %}
+				</div>
+			</article>
+			{% endfor %}
+		</div>
+
+		<h2 class="landing-section-title">Administradores</h2>
+		<p class="admin-hint">Solo un administrador ya autenticado puede crear otros. No hay auto-registro.</p>
+
+		<table class="admin-table">
+			<thead>
+				<tr>
+					<th>Correo</th>
+					<th>Creado</th>
+					<th>Creado por</th>
+				</tr>
+			</thead>
+			<tbody>
+				{% for admin in admins %}
+				<tr>
+					<td>{{ admin.email }}</td>
+					<td>{{ admin.created_at[:19].replace('T', ' ') if admin.created_at else '—' }}</td>
+					<td>{{ admin.created_by_email or '—' }}</td>
+				</tr>
+				{% endfor %}
+			</tbody>
+		</table>
+
+		<p style="margin-top:16px;">
+			<a class="btn btn-secondary" href="/admin/admins/new">+ Crear administrador</a>
+		</p>
+	</main>
+</body>
+</html>
