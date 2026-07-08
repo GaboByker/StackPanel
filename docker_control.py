@@ -9,30 +9,61 @@ DOCKER_SOCK = os.environ.get('DOCKER_SOCK', '/var/run/docker.sock')
 
 MANAGED_SERVICES = {
     'empires': {
-        'container': 'empires-allies',
+        'containers': ['empires-allies'],
         'label': 'Empires & Allies',
         'database': 'Empires-Allies/instance/save.db',
         'port': 5006,
         'health_path': '/',
     },
     'finanzas': {
-        'container': 'finanzas-personales',
+        'containers': ['finanzas-personales'],
         'label': 'Finanzas Personales',
         'database': 'finanzas-personales/instance/finanzas.db',
         'port': 5050,
         'health_path': '/',
     },
+    'wapicenter': {
+        'containers': [
+            'wapicenter-postgres',
+            'wapicenter-redis',
+            'wapicenter-api',
+            'wapicenter-frontend',
+        ],
+        'container_prefixes': ['wapicenter-worker'],
+        'compose_project': 'wapicenter',
+        'label': 'WApiCenter',
+        'database': 'WApiCenter (volumen postgres_data)',
+        'port': 8090,
+        'health_path': '/',
+        'start_order': [
+            'wapicenter-postgres',
+            'wapicenter-redis',
+            'wapicenter-api',
+        ],
+        'stop_order': [
+            'wapicenter-frontend',
+            'wapicenter-api',
+            'wapicenter-redis',
+            'wapicenter-postgres',
+        ],
+    },
 }
 
 
+_STOP_GRACE_SEC = 5
+_STOP_HTTP_TIMEOUT = 12
+_KILL_HTTP_TIMEOUT = 10
+
+
 class _DockerSocketConnection(http.client.HTTPConnection):
-    def __init__(self, socket_path):
+    def __init__(self, socket_path, connect_timeout=10):
         super().__init__('localhost')
         self._socket_path = socket_path
+        self._connect_timeout = connect_timeout
 
     def connect(self):
         self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        self.sock.settimeout(30)
+        self.sock.settimeout(self._connect_timeout)
         self.sock.connect(self._socket_path)
 
 
@@ -76,12 +107,89 @@ def _container_states():
     return states, ''
 
 
+def _resolve_service_containers(meta, states=None):
+    """Lista todos los contenedores de un servicio, incluyendo workers escalados."""
+    containers = list(meta.get('containers') or [])
+    if states is None:
+        states, _ = _container_states()
+    if states:
+        for name in states:
+            for prefix in meta.get('container_prefixes') or []:
+                if name.startswith(prefix) and name not in containers:
+                    containers.append(name)
+    return containers
+
+
 def _container_running(container):
     data, err = _docker_request('GET', f'/containers/{container}/json')
     if err:
         return None, err
     state = (data.get('State') or {}).get('Status', '').lower()
     return state == 'running', state
+
+
+def _is_already_stopped_error(err):
+    if not err:
+        return False
+    lowered = err.lower()
+    return (
+        '404' in err
+        or 'is not running' in lowered
+        or 'already stopped' in lowered
+    )
+
+
+def _container_is_running(states, container):
+    return (states or {}).get(container) == 'running'
+
+
+def _stop_container(container, states=None):
+    """Detiene un contenedor; omite los que ya están parados."""
+    if states is not None and not _container_is_running(states, container):
+        return True, ''
+
+    _, err = _docker_request(
+        'POST',
+        f'/containers/{container}/stop?t={_STOP_GRACE_SEC}',
+        timeout=_STOP_HTTP_TIMEOUT,
+    )
+    if not err or _is_already_stopped_error(err):
+        return True, ''
+
+    running, _ = _container_running(container)
+    if running is False:
+        return True, ''
+
+    if running:
+        _, kill_err = _docker_request(
+            'POST',
+            f'/containers/{container}/kill',
+            timeout=_KILL_HTTP_TIMEOUT,
+        )
+        if not kill_err or _is_already_stopped_error(kill_err):
+            return True, ''
+        running, _ = _container_running(container)
+        if running is False:
+            return True, ''
+        return False, kill_err or err
+
+    return False, err
+
+
+def _start_container(container, states=None):
+    """Inicia un contenedor; omite los que ya están en marcha."""
+    if states is not None and _container_is_running(states, container):
+        return True, ''
+
+    _, err = _docker_request('POST', f'/containers/{container}/start', timeout=15)
+    if not err:
+        return True, ''
+    if '404' in err:
+        return False, err
+    lowered = err.lower()
+    if 'already started' in lowered or 'is not paused' in lowered:
+        return True, ''
+    return False, err
 
 
 def _health_check(container, port, path='/'):
@@ -99,22 +207,37 @@ def list_service_status():
     states, docker_err = _container_states()
     result = []
     for key, meta in MANAGED_SERVICES.items():
-        container = meta['container']
+        containers = _resolve_service_containers(meta, states)
+        primary = containers[0] if containers else ''
         running = False
         state = 'unknown'
         error = docker_err
+        container_states = []
 
         if states is not None:
-            state = states.get(container, 'missing')
-            running = state == 'running'
+            for container in containers:
+                cstate = states.get(container, 'missing')
+                container_states.append({'name': container, 'state': cstate})
+            if container_states:
+                running_count = sum(1 for c in container_states if c['state'] == 'running')
+                if running_count == len(container_states):
+                    running = True
+                    state = 'running'
+                elif running_count > 0:
+                    running = False
+                    state = f'parcial ({running_count}/{len(container_states)})'
+                else:
+                    first = container_states[0]['state']
+                    state = first if first != 'missing' else 'stopped'
+                    running = False
         else:
-            inspected, inspect_state = _container_running(container)
+            inspected, inspect_state = _container_running(primary)
             if inspected is not None:
                 running = inspected
                 state = inspect_state or ('running' if running else 'stopped')
                 error = ''
             elif meta.get('port'):
-                if _health_check(container, meta['port'], meta.get('health_path', '/')):
+                if _health_check(primary, meta['port'], meta.get('health_path', '/')):
                     running = True
                     state = 'running (red)'
                     error = docker_err or 'Estado inferido por red; Docker no respondió.'
@@ -122,7 +245,9 @@ def list_service_status():
         result.append({
             'key': key,
             'label': meta['label'],
-            'container': container,
+            'container': primary,
+            'containers': containers,
+            'container_states': container_states,
             'database': meta['database'],
             'port': meta.get('port'),
             'running': running,
@@ -136,19 +261,82 @@ def stop_service(service_key):
     meta = MANAGED_SERVICES.get(service_key)
     if not meta:
         return False, 'Servicio desconocido.'
-    container = meta['container']
-    _, err = _docker_request('POST', f'/containers/{container}/stop?t=30')
-    if err:
-        return False, err
-    return True, f'Contenedor {container} detenido.'
+
+    states, docker_err = _container_states()
+    if docker_err:
+        return False, docker_err
+
+    containers = _resolve_service_containers(meta, states)
+    stop_order = meta.get('stop_order') or list(reversed(containers))
+    ordered = [c for c in stop_order if c in containers]
+    ordered.extend(c for c in containers if c not in ordered)
+
+    stopped = []
+    skipped = []
+    for container in ordered:
+        if not _container_is_running(states, container):
+            skipped.append(container)
+            continue
+        ok, err = _stop_container(container, states)
+        if not ok:
+            return False, err
+        stopped.append(container)
+        states[container] = 'exited'
+
+    if not stopped and skipped:
+        return True, 'El proyecto ya estaba detenido.'
+
+    parts = []
+    if stopped:
+        parts.append('detenidos: ' + ', '.join(stopped))
+    if skipped:
+        parts.append('ya parados: ' + ', '.join(skipped))
+    return True, 'Contenedores ' + '; '.join(parts) + '.'
 
 
 def start_service(service_key):
     meta = MANAGED_SERVICES.get(service_key)
     if not meta:
         return False, 'Servicio desconocido.'
-    container = meta['container']
-    _, err = _docker_request('POST', f'/containers/{container}/start')
-    if err:
-        return False, err
-    return True, f'Contenedor {container} iniciado.'
+
+    states, docker_err = _container_states()
+    if docker_err:
+        return False, docker_err
+
+    containers = _resolve_service_containers(meta, states)
+    start_order = meta.get('start_order') or containers
+    ordered = [c for c in start_order if c in containers]
+    ordered.extend(c for c in containers if c not in ordered)
+
+    started = []
+    skipped = []
+    for container in ordered:
+        if _container_is_running(states, container):
+            skipped.append(container)
+            continue
+        ok, err = _start_container(container, states)
+        if not ok:
+            return False, err
+        started.append(container)
+        states[container] = 'running'
+
+    if not started and skipped:
+        return True, 'El proyecto ya estaba en marcha.'
+
+    parts = []
+    if started:
+        parts.append('iniciados: ' + ', '.join(started))
+    if skipped:
+        parts.append('ya en marcha: ' + ', '.join(skipped))
+    return True, 'Contenedores ' + '; '.join(parts) + '.'
+
+
+def container_to_project_map():
+    """Mapea nombre de contenedor -> clave de proyecto."""
+    mapping = {}
+    states, _ = _container_states()
+    for key, meta in MANAGED_SERVICES.items():
+        for container in _resolve_service_containers(meta, states):
+            mapping[container] = key
+    mapping['portal'] = 'portal'
+    return mapping

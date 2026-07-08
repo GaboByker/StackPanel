@@ -14,5 +14,13 @@
     "port": 5050,
     "path": "/",
     "icon_path": null
+  },
+  {
+    "id": "wapicenter",
+    "name": "WApiCenter",
+    "description": "Plataforma de automatización de WhatsApp con editor visual de flujos, API y workers.",
+    "port": 8090,
+    "path": "/",
+    "icon_path": null
   }
 ]

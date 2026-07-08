@@ -4,7 +4,7 @@ import json
 import os
 from datetime import timedelta
 
-from flask import Flask, flash, g, redirect, render_template, request, url_for
+from flask import Flask, flash, g, jsonify, redirect, render_template, request, url_for
 
 from auth import (
     authenticate,
@@ -17,6 +17,7 @@ from auth import (
     logout_admin,
 )
 from docker_control import list_service_status, start_service, stop_service
+from system_monitor import get_system_metrics
 
 PORTAL_ROOT = os.path.dirname(os.path.abspath(__file__))
 PUBLIC_HOST = os.environ.get('PUBLIC_HOST', '161.97.162.177')
@@ -114,6 +115,13 @@ def admin_panel():
         admins=list_admins(PORTAL_ROOT),
         public_host=PUBLIC_HOST,
     )
+
+
+@app.route('/admin/api/metrics')
+def admin_metrics_api():
+    if not get_admin_id():
+        return {'error': 'No autorizado'}, 401
+    return jsonify(get_system_metrics())
 
 
 @app.route('/admin/containers/<service_key>/stop', methods=['POST'])
