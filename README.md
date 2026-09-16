@@ -19,9 +19,28 @@ Un panel de administración autoalojado (self-hosted) para gestionar múltiples 
 
 Flask + Waitress, SQLite, Docker Engine API (socket directo), Nginx.
 
-## Correr con Docker
+## Instalación rápida
+
+Requisitos: [Docker](https://docs.docker.com/engine/install/) con el plugin `docker compose` (v2).
 
 ```bash
-docker build -t stackpanel .
-docker run -d -p 5005:5005 -v /var/run/docker.sock:/var/run/docker.sock stackpanel
+curl -fsSL https://raw.githubusercontent.com/GaboByker/StackPanel/main/install.sh | bash
+```
+
+Esto descarga el código (sin necesitar `git`), crea las carpetas de datos (`html/`, `backups/`, `proxy/sites/`, `instance/`), genera un `.env` con una clave nueva y levanta los contenedores. Al terminar te muestra la URL para abrir el panel — la primera vez te lleva directo al asistente de configuración (`/setup`) para crear el usuario administrador.
+
+Variables opcionales antes de instalar:
+
+```bash
+STACKPANEL_DIR=/otra/ruta STACKPANEL_BRANCH=main \
+  curl -fsSL https://raw.githubusercontent.com/GaboByker/StackPanel/main/install.sh | bash
+```
+
+### Actualizar o apagar
+
+```bash
+cd ~/stackpanel   # o el directorio que hayas elegido
+docker compose logs -f portal   # ver logs
+docker compose down             # apagar
+docker compose up -d --build    # actualizar/reiniciar
 ```

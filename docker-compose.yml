@@ -1,0 +1,64 @@
+name: stackpanel
+
+services:
+  portal:
+    build:
+      context: .
+    container_name: stackpanel
+    ports:
+      - "${PORTAL_PORT:-5005}:5005"
+    environment:
+      PUBLIC_HOST: ${PUBLIC_HOST:-localhost}
+      PORTAL_PORT: "5005"
+      PORTAL_SECRET_KEY: ${PORTAL_SECRET_KEY:?definí PORTAL_SECRET_KEY en .env}
+      DOCKER_SOCK: /var/run/docker.sock
+      HOST_STACK_ROOT: ${STACK_ROOT:?definí STACK_ROOT en .env}
+      PORTAL_MAX_UPLOAD_MB: ${PORTAL_MAX_UPLOAD_MB:-512}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${STACK_ROOT:?definí STACK_ROOT en .env}:/stack:ro
+      - ./instance:/app/instance
+      - ./proxy/sites:/app/proxy-sites
+      - ./html:/app/html-rw
+      - ./backups:/app/backups
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    networks:
+      - stackpanel
+
+  proxy:
+    image: nginx:alpine
+    container_name: stackpanel-proxy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./proxy/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./proxy/sites:/etc/nginx/sites:ro
+      - proxy-certbot-etc:/etc/letsencrypt:ro
+      - proxy-certbot-www:/var/www/certbot:ro
+    networks:
+      - stackpanel
+
+  proxy-certbot:
+    image: certbot/certbot
+    container_name: stackpanel-certbot
+    restart: unless-stopped
+    volumes:
+      - proxy-certbot-etc:/etc/letsencrypt
+      - proxy-certbot-www:/var/www/certbot
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"
+    networks:
+      - stackpanel
+
+networks:
+  stackpanel:
+    driver: bridge
+
+volumes:
+  proxy-certbot-etc:
+  proxy-certbot-www:
