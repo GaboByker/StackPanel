@@ -62,7 +62,17 @@ if [ ! -f .env ]; then
     cp .env.example .env
 
     SECRET=$(openssl rand -hex 32 2>/dev/null || head -c32 /dev/urandom | od -An -tx1 | tr -d ' \n')
-    PUBLIC_IP=$(curl -fsSL --max-time 3 ifconfig.me 2>/dev/null || echo "localhost")
+
+    # Preferimos IPv4: en hosts con IPv4 e IPv6, "curl ifconfig.me" sin forzar
+    # protocolo suele devolver la IPv6, y esa URL rompe sin corchetes ([::1]).
+    PUBLIC_IP=$(curl -fsSL --max-time 3 -4 ifconfig.me 2>/dev/null || true)
+    if [ -z "${PUBLIC_IP}" ]; then
+        PUBLIC_IP=$(curl -fsSL --max-time 3 -6 ifconfig.me 2>/dev/null || true)
+    fi
+    case "${PUBLIC_IP}" in
+        "") PUBLIC_IP="localhost" ;;
+        *:*) PUBLIC_IP="[${PUBLIC_IP}]" ;;  # IPv6: necesita corchetes en una URL
+    esac
 
     sed -i.bak "s#^PORTAL_SECRET_KEY=.*#PORTAL_SECRET_KEY=${SECRET}#" .env
     sed -i.bak "s#^PUBLIC_HOST=.*#PUBLIC_HOST=${PUBLIC_IP}#" .env
