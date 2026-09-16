@@ -25,15 +25,17 @@ if ! command -v docker >/dev/null 2>&1; then
     cat >&2 <<'MSG'
 Docker no está instalado. Instalalo primero y volvé a correr este script.
 
-  Debian/Ubuntu:
-    sudo apt update && sudo apt install -y docker.io docker-compose-v2
-    sudo usermod -aG docker "$USER"
-    # cerrá sesión y volvé a entrar (o ejecutá: newgrp docker)
+  curl -fsSL https://get.docker.com | sh
+  sudo usermod -aG docker "$USER"
+  newgrp docker   # activa el grupo ya, sin cerrar sesión
 
-  Cualquier otra distro / instalador oficial:
-    curl -fsSL https://get.docker.com | sh
+El paso de usermod/newgrp es obligatorio: sin él, "docker" falla con
+"permission denied" aunque ya hayas agregado el usuario al grupo, porque
+Linux solo revisa la membresía de grupos al iniciar sesión.
 
-Más info: https://docs.docker.com/engine/install/
+Nota: ese script es para desarrollo/pruebas rápidas. Para producción, Docker
+recomienda el repositorio apt oficial de tu distro en su lugar:
+https://docs.docker.com/engine/install/
 MSG
     exit 1
 fi

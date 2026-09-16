@@ -23,12 +23,15 @@ Flask + Waitress, SQLite, Docker Engine API (socket directo), Nginx.
 
 ### Requisitos
 
-- **Docker** con el plugin `docker compose` (v2). Si no lo tenés, el instalador te lo dice y corta — instalalo primero:
+- **Docker** con el plugin `docker compose` (v2). Si no lo tenés, el instalador te lo dice y corta — instalalo primero con el [script oficial de Docker](https://docs.docker.com/engine/install/) (funciona en la mayoría de las distros Linux):
   ```bash
-  sudo apt update && sudo apt install -y docker.io docker-compose-v2
-  sudo usermod -aG docker "$USER"   # cerrá sesión y volvé a entrar después
+  curl -fsSL https://get.docker.com | sh
+  sudo usermod -aG docker "$USER"
+  newgrp docker   # activa el grupo ya, sin tener que cerrar sesión
   ```
-  (en otras distros: `curl -fsSL https://get.docker.com | sh`)
+  El paso de `usermod`/`newgrp` **es necesario**: Linux solo revisa a qué grupos pertenecés al iniciar sesión, así que aunque el usuario ya quede en el grupo `docker`, la sesión/terminal actual no se entera hasta que la refrescás — con `newgrp docker` (inmediato, en la misma terminal) o cerrando sesión y volviendo a entrar. Sin este paso, `docker` va a fallar con "permission denied" salvo que uses `sudo docker ...`.
+
+  > Docker aclara que este script de conveniencia es para desarrollo/pruebas, no lo recomienda para producción. Para un servidor de producción, usá el [repositorio apt oficial de tu distro](https://docs.docker.com/engine/install/debian/) en su lugar (más pasos, pero controlás la versión exacta).
 - **Puertos 80 y 443 libres.** Los usa el proxy nginx/SSL del panel (certificados Let's Encrypt incluidos) — no son configurables. Si ya tenés algo corriendo ahí (otro nginx, Apache, Caddy, etc.), liberalos o el instalador va a saltear el proxy automáticamente y solo levantar el panel.
 - El puerto del panel en sí (**5005** por defecto) **sí es flexible**: si está ocupado, el instalador elige automáticamente el próximo puerto libre.
 
@@ -38,12 +41,15 @@ curl -fsSL https://raw.githubusercontent.com/GaboByker/StackPanel/main/install.s
 
 Esto descarga el código (sin necesitar `git`), crea las carpetas de datos (`html/`, `backups/`, `proxy/sites/`, `instance/`), genera un `.env` con una clave nueva, elige un puerto libre para el panel y levanta los contenedores. Al terminar te muestra la URL para abrir el panel — la primera vez te lleva directo al asistente de configuración (`/setup`) para crear el usuario administrador.
 
-Variables opcionales antes de instalar:
+Por defecto instala en `~/stackpanel` desde la rama `main`. Si querés otra carpeta u otra rama, definí esas variables de entorno antes del `curl` (en la misma línea, así solo aplican a ese comando):
 
 ```bash
 STACKPANEL_DIR=/otra/ruta STACKPANEL_BRANCH=main \
   curl -fsSL https://raw.githubusercontent.com/GaboByker/StackPanel/main/install.sh | bash
 ```
+
+- `STACKPANEL_DIR` — dónde se instala (default: `~/stackpanel`)
+- `STACKPANEL_BRANCH` — qué rama del repo descargar (default: `main`)
 
 ### Actualizar o apagar
 
