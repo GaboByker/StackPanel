@@ -1,7 +1,13 @@
-"""Métricas de CPU y memoria vía Docker API (estilo htop por proyecto)."""
+"""Métricas de CPU, memoria y almacenamiento vía Docker API (estilo htop por proyecto)."""
+import os
+import shutil
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from docker_control import MANAGED_SERVICES, _container_states, _docker_request, _resolve_service_containers
+
+# Ruta desde la que se mide el almacenamiento del host. El contenedor del portal
+# monta el home del host (solo lectura) en /stack; fuera de Docker, se usa '/'.
+_DISK_PATH = '/stack' if os.path.isdir('/stack') else '/'
 
 PROJECT_LABELS = {key: meta['label'] for key, meta in MANAGED_SERVICES.items()}
 PROJECT_LABELS['portal'] = 'Portal'
@@ -65,6 +71,24 @@ def _host_info():
     }, ''
 
 
+def _host_disk_usage():
+    try:
+        usage = shutil.disk_usage(_DISK_PATH)
+    except OSError as exc:
+        return {}, f'disco: {exc}'
+
+    used_percent = (usage.used / usage.total * 100.0) if usage.total else 0.0
+    return {
+        'disk_total_bytes': usage.total,
+        'disk_used_bytes': usage.used,
+        'disk_free_bytes': usage.free,
+        'disk_total_human': _format_bytes(usage.total),
+        'disk_used_human': _format_bytes(usage.used),
+        'disk_free_human': _format_bytes(usage.free),
+        'disk_used_percent': round(used_percent, 2),
+    }, ''
+
+
 def _fetch_container_stats_batch(containers):
     """Obtiene stats de varios contenedores en paralelo (cada llamada a Docker tarda ~1–2 s)."""
     if not containers:
@@ -83,11 +107,13 @@ def _fetch_container_stats_batch(containers):
 
 
 def get_system_metrics():
-    with ThreadPoolExecutor(max_workers=2) as pool:
+    with ThreadPoolExecutor(max_workers=3) as pool:
         states_future = pool.submit(_container_states)
         host_future = pool.submit(_host_info)
+        disk_future = pool.submit(_host_disk_usage)
         states, docker_err = states_future.result()
         host, host_err = host_future.result()
+        disk, disk_err = disk_future.result()
 
     container_to_project = {}
     for key, meta in MANAGED_SERVICES.items():
@@ -114,6 +140,8 @@ def get_system_metrics():
         errors.append(docker_err)
     if host_err:
         errors.append(host_err)
+    if disk_err:
+        errors.append(disk_err)
 
     stats_by_container = {}
     if states:
@@ -190,6 +218,7 @@ def get_system_metrics():
     return {
         'host': {
             **host,
+            **disk,
             'cpu_used_percent': round(total_cpu, 2),
             'memory_used_bytes': total_mem,
             'memory_used_human': _format_bytes(total_mem),

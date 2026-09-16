@@ -1,0 +1,75 @@
+{% extends "base_admin.html" %}
+{% block title %}Bases de datos · {{ project.name }}{% endblock %}
+{% block heading %}Bases de datos — {{ project.name }}{% endblock %}
+{% block topbar_actions %}
+<a class="btn btn-secondary btn-sm" href="/admin/projects/{{ project.id }}">← {{ project.name }}</a>
+{% endblock %}
+{% block content %}
+
+<form method="post" action="/admin/projects/{{ project.id }}/database/autodetect" style="margin-bottom:20px;">
+	<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+	<button type="submit" class="btn btn-primary">🔍 Auto-detectar desde el .env del proyecto</button>
+	<span class="admin-hint" style="margin-left:8px;">Lee las credenciales del <code>.env</code> y prueba varias formas de conectar hasta encontrar la que funciona.</span>
+</form>
+
+<h2 class="landing-section-title">Conexiones existentes</h2>
+{% if databases %}
+<div class="admin-table-wrap" style="margin-bottom:24px;">
+	<table class="admin-table">
+		<thead><tr><th>Motor</th><th>Host</th><th>BD</th><th>Escritura</th><th></th></tr></thead>
+		<tbody>
+			{% for db in databases %}
+			<tr>
+				<td>{{ db.engine }}</td>
+				<td><code>{{ db.host }}:{{ db.port }}</code></td>
+				<td>{{ db.dbname }}</td>
+				<td>{{ 'Sí' if db.allow_write else 'No' }}</td>
+				<td><a class="btn btn-secondary btn-sm" href="/admin/projects/{{ project.id }}/database/{{ db.id }}/view">Explorar</a></td>
+			</tr>
+			{% endfor %}
+		</tbody>
+	</table>
+</div>
+{% else %}
+<p class="empty-state">Aún no hay conexiones. Agrega una abajo.</p>
+{% endif %}
+
+<h2 class="landing-section-title">Nueva conexión</h2>
+<form method="post" style="max-width:480px;">
+	<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+	<div class="field">
+		<label>Motor</label>
+		<select name="engine">
+			<option value="mysql">MySQL / MariaDB</option>
+			<option value="postgres">PostgreSQL</option>
+		</select>
+	</div>
+	<div class="form-row">
+		<div class="field">
+			<label>Host</label>
+			<input type="text" name="host" placeholder="torres-db" required/>
+		</div>
+		<div class="field">
+			<label>Puerto</label>
+			<input type="number" name="port" placeholder="3306"/>
+		</div>
+	</div>
+	<div class="form-row">
+		<div class="field">
+			<label>Usuario</label>
+			<input type="text" name="username" required/>
+		</div>
+		<div class="field">
+			<label>Contraseña</label>
+			<input type="password" name="password"/>
+		</div>
+	</div>
+	<div class="field">
+		<label>Nombre de la base de datos</label>
+		<input type="text" name="dbname" required/>
+	</div>
+	<p class="admin-hint">El host debe ser alcanzable desde el contenedor del panel (nombre de contenedor en la misma red, o <code>host.docker.internal</code>).</p>
+	<button type="submit" class="btn btn-primary">Agregar</button>
+</form>
+
+{% endblock %}

@@ -1,0 +1,16 @@
+{
+  "0": "docker_control.py",
+  "1": "portal-server.py",
+  "2": "services (contenedores)",
+  "3": "Panel admin — Portal",
+  "4": "Portal — Proyectos",
+  "5": "auth.py",
+  "6": "route",
+  "7": "system_monitor.py",
+  "8": "Grafos Graphify — Admin",
+  "9": "graphs (proyectos con grafo)",
+  "10": "Formulario inicio de sesión admin",
+  "11": "/admin/logout",
+  "12": "current_admin",
+  "13": "admin_login"
+}

@@ -1,0 +1,31 @@
+{% extends "base_admin.html" %}
+{% block title %}Administradores{% endblock %}
+{% block heading %}Administradores{% endblock %}
+{% block topbar_actions %}
+<a class="btn btn-secondary btn-sm" href="/admin/password">Cambiar mi contraseña</a>
+<a class="btn btn-secondary btn-sm" href="/admin/2fa">Verificación en dos pasos</a>
+<a class="btn btn-secondary btn-sm" href="/admin/audit">Auditoría</a>
+<a class="btn btn-primary btn-sm" href="/admin/admins/new">+ Crear administrador</a>
+{% endblock %}
+{% block content %}
+
+<p class="admin-hint">Solo un administrador ya autenticado puede crear otros. No hay auto-registro.</p>
+
+<div class="admin-table-wrap">
+	<table class="admin-table">
+		<thead>
+			<tr><th>Correo</th><th>Creado</th><th>Creado por</th></tr>
+		</thead>
+		<tbody>
+			{% for admin in admins %}
+			<tr>
+				<td>{{ admin.email }}</td>
+				<td>{{ admin.created_at[:19].replace('T', ' ') if admin.created_at else '—' }}</td>
+				<td>{{ admin.created_by_email or '—' }}</td>
+			</tr>
+			{% endfor %}
+		</tbody>
+	</table>
+</div>
+
+{% endblock %}

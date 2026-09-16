@@ -1,0 +1,25 @@
+{% extends "base_admin.html" %}
+{% block title %}Recursos{% endblock %}
+{% block heading %}Historial de recursos (24h){% endblock %}
+{% block content %}
+
+<p class="admin-hint">Muestreo cada 5 minutos. Se guarda hasta 7 días de historial.</p>
+
+{% if history %}
+<div class="htop-panel">
+	<svg viewBox="0 0 760 140" width="100%" height="180" preserveAspectRatio="none">
+		<polyline points="{{ cpu_points }}" fill="none" stroke="#3fb950" stroke-width="2"/>
+		<polyline points="{{ mem_points }}" fill="none" stroke="#58a6ff" stroke-width="2"/>
+		<polyline points="{{ disk_points }}" fill="none" stroke="#d29922" stroke-width="2"/>
+	</svg>
+	<p style="margin:10px 0 0; font-size:12px;">
+		<span style="color:#3fb950;">■</span> CPU &nbsp;
+		<span style="color:#58a6ff;">■</span> Memoria &nbsp;
+		<span style="color:#d29922;">■</span> Disco
+	</p>
+</div>
+{% else %}
+<p class="empty-state">Todavía no hay suficiente historial — vuelve en unos minutos.</p>
+{% endif %}
+
+{% endblock %}

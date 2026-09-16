@@ -1,0 +1,100 @@
+{% extends "base_admin.html" %}
+{% block title %}Nuevo proyecto{% endblock %}
+{% block heading %}Nuevo proyecto{% endblock %}
+{% block content %}
+
+<p class="admin-hint">Publica una app que ya está corriendo. Si tiene dominio propio, esto también crea el sitio en el proxy y puede emitir su certificado SSL.</p>
+
+{% if error %}
+<div class="alert alert-error">{{ error }}</div>
+{% endif %}
+
+<form method="post" style="max-width:560px;">
+	<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+	<div class="field">
+		<label for="name">Nombre</label>
+		<input type="text" id="name" name="name" required autofocus placeholder="Mi proyecto"/>
+	</div>
+
+	<div class="field">
+		<label for="description">Descripción</label>
+		<input type="text" id="description" name="description" placeholder="Una línea breve para la tarjeta del portal"/>
+	</div>
+
+	<div class="field">
+		<label for="icon_path">Ícono (opcional)</label>
+		<input type="text" id="icon_path" name="icon_path" placeholder="/img/icon.png o https://…"/>
+		<p class="field-hint">Ruta relativa a la app, o una URL completa. Si se deja vacío se usa la inicial del nombre.</p>
+	</div>
+
+	<div class="field">
+		<label>Cómo se accede</label>
+		<div class="segmented">
+			<input type="radio" id="mode-port" name="access_mode" value="port" checked/>
+			<label for="mode-port" id="mode-port-label">Por puerto</label>
+			<input type="radio" id="mode-domain" name="access_mode" value="domain"/>
+			<label for="mode-domain" id="mode-domain-label">Dominio propio</label>
+		</div>
+	</div>
+
+	<div id="port-fields">
+		<div class="field">
+			<label for="port">Puerto</label>
+			<input type="number" id="port" name="port" min="1" max="65535" placeholder="5050"/>
+			<p class="field-hint">El portal enlazará a http://{{ public_host if public_host else 'IP' }}:puerto</p>
+		</div>
+	</div>
+
+	<div id="domain-fields" hidden>
+		<div class="field">
+			<label for="domain">Dominio</label>
+			<input type="text" id="domain" name="domain" placeholder="miapp.midominio.com"/>
+			<p class="field-hint">El DNS de este dominio ya debe apuntar a este servidor.</p>
+		</div>
+		<div class="field">
+			<label for="proxy_target_port">Destino interno (puerto)</label>
+			<input type="number" id="proxy_target_port" name="proxy_target_port" min="1" max="65535" placeholder="8080"/>
+			<p class="field-hint">El host de destino se resuelve automáticamente (host.docker.internal); solo indica el puerto donde ya responde la app.</p>
+		</div>
+		<div class="field">
+			<label class="checkbox-row">
+				<input type="checkbox" name="request_ssl"/>
+				Emitir certificado SSL ahora (requiere que el DNS ya apunte aquí)
+			</label>
+		</div>
+	</div>
+
+	<div class="field">
+		<label for="path">Ruta de entrada</label>
+		<input type="text" id="path" name="path" value="/" placeholder="/"/>
+	</div>
+
+	<button type="submit" class="btn btn-primary">Crear proyecto</button>
+	<a class="btn btn-secondary" href="/admin/projects">Cancelar</a>
+</form>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+	const portRadio = document.getElementById('mode-port');
+	const domainRadio = document.getElementById('mode-domain');
+	const portFields = document.getElementById('port-fields');
+	const domainFields = document.getElementById('domain-fields');
+	const portLabel = document.getElementById('mode-port-label');
+	const domainLabel = document.getElementById('mode-domain-label');
+
+	function sync() {
+		const isDomain = domainRadio.checked;
+		portFields.hidden = isDomain;
+		domainFields.hidden = !isDomain;
+		portLabel.classList.toggle('active', !isDomain);
+		domainLabel.classList.toggle('active', isDomain);
+	}
+	portRadio.addEventListener('change', sync);
+	domainRadio.addEventListener('change', sync);
+	sync();
+})();
+</script>
+{% endblock %}

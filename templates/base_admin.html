@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+	<meta charset="utf-8"/>
+	<meta name="viewport" content="width=device-width, initial-scale=1"/>
+	<title>{% block title %}Panel{% endblock %} · Administración</title>
+	<meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate"/>
+	<meta http-equiv="Pragma" content="no-cache"/>
+	<link rel="stylesheet" href="/static/css/portal.css"/>
+	<script>
+		(function () {
+			try {
+				var saved = localStorage.getItem('panel-theme');
+				if (saved) document.documentElement.setAttribute('data-theme', saved);
+			} catch (e) {}
+		})();
+	</script>
+</head>
+<body class="admin-shell">
+	<div class="admin-layout">
+		<aside class="admin-sidebar" id="admin-sidebar">
+			<div class="admin-sidebar-top">
+				<a href="/admin" class="admin-brand">
+					<span class="admin-brand-dot"></span>
+					<span>Panel</span>
+				</a>
+				<button type="button" class="admin-nav-toggle" id="admin-nav-toggle" aria-label="Abrir menú" aria-expanded="false">
+					<span></span><span></span><span></span>
+				</button>
+			</div>
+			<nav class="admin-nav" aria-label="Navegación de administración">
+				<a href="/admin" class="{{ 'active' if request.path == '/admin' else '' }}">Resumen</a>
+				<a href="/admin/projects" class="{{ 'active' if request.path.startswith('/admin/projects') else '' }}">Proyectos</a>
+				<a href="/admin/files/" class="{{ 'active' if request.path.startswith('/admin/files') else '' }}">Archivos</a>
+				<a href="/admin/proxy" class="{{ 'active' if request.path.startswith('/admin/proxy') else '' }}">Proxy &amp; SSL</a>
+				<a href="/admin/firewall" class="{{ 'active' if request.path.startswith('/admin/firewall') else '' }}">Firewall</a>
+				<a href="/admin/backups" class="{{ 'active' if request.path.startswith('/admin/backups') else '' }}">Backups</a>
+				<a href="/admin/resources" class="{{ 'active' if request.path.startswith('/admin/resources') else '' }}">Recursos</a>
+				<a href="/admin/notifications" class="{{ 'active' if request.path.startswith('/admin/notifications') else '' }}">Notificaciones</a>
+				<a href="/admin/graphify" class="{{ 'active' if request.path.startswith('/admin/graphify') else '' }}">Grafos</a>
+				<a href="/admin/admins" class="{{ 'active' if request.path.startswith('/admin/admins') else '' }}">Administradores</a>
+			</nav>
+			<div class="admin-sidebar-footer">
+				<label class="theme-switch" for="theme-toggle-input">
+					<span class="theme-switch-label">Tema oscuro</span>
+					<span class="switch">
+						<input type="checkbox" id="theme-toggle-input"/>
+						<span class="switch-track"><span class="switch-thumb"></span></span>
+					</span>
+				</label>
+				<a href="/" target="_blank" rel="noopener" class="admin-sidebar-link">Ver portal ↗</a>
+				<div class="admin-user" title="{{ current_admin.email }}">{{ current_admin.email }}</div>
+				<form method="post" action="/admin/logout" class="logout-form">
+					<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+					<button type="submit" class="admin-sidebar-logout">Cerrar sesión</button>
+				</form>
+			</div>
+		</aside>
+
+		<div class="admin-main">
+			<header class="admin-topbar">
+				<span class="admin-topbar-title">{% block heading %}{% endblock %}</span>
+				{% block topbar_actions %}{% endblock %}
+			</header>
+			<main class="admin-content">
+				{% with messages = get_flashed_messages(with_categories=true) %}
+					{% if messages %}
+						{% for category, message in messages %}
+						<div class="alert alert-{{ category }}">{{ message }}</div>
+						{% endfor %}
+					{% endif %}
+				{% endwith %}
+				{% block content %}{% endblock %}
+			</main>
+		</div>
+	</div>
+	{% block scripts %}{% endblock %}
+	<script>
+		window.addEventListener('pageshow', function (event) {
+			if (event.persisted) { window.location.reload(); }
+		});
+
+		(function () {
+			var input = document.getElementById('theme-toggle-input');
+			var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+
+			function current() {
+				var explicit = document.documentElement.getAttribute('data-theme');
+				return explicit || (prefersDark ? 'dark' : 'light');
+			}
+			input.checked = current() === 'dark';
+			input.addEventListener('change', function () {
+				var next = input.checked ? 'dark' : 'light';
+				document.documentElement.setAttribute('data-theme', next);
+				try { localStorage.setItem('panel-theme', next); } catch (e) {}
+			});
+		})();
+
+		(function () {
+			var sidebar = document.getElementById('admin-sidebar');
+			var toggle = document.getElementById('admin-nav-toggle');
+			toggle.addEventListener('click', function () {
+				var open = sidebar.classList.toggle('nav-open');
+				toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+			});
+		})();
+	</script>
+</body>
+</html>

@@ -5,28 +5,32 @@
 	<meta name="viewport" content="width=device-width, initial-scale=1"/>
 	<title>Portal — Proyectos</title>
 	<meta name="description" content="Elige el proyecto al que quieres entrar. Cada aplicación funciona de forma independiente."/>
+	<meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate"/>
+	<meta http-equiv="Pragma" content="no-cache"/>
 	<link rel="stylesheet" href="/static/css/portal.css"/>
 </head>
 <body class="landing-page">
 	<header class="landing-topbar">
-		<div class="landing-topbar-brand">
-			<span>Portal de proyectos</span>
-		</div>
+		<div class="landing-topbar-brand">Portal de proyectos</div>
 		<nav aria-label="Navegación principal">
+			{% if current_admin %}
+			<span class="admin-user">{{ current_admin.email }}</span>
+			<a href="/admin">Panel</a>
+			<form method="post" action="/admin/logout" class="logout-form">
+				<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+				<button type="submit">Salir</button>
+			</form>
+			{% else %}
 			<a href="/admin/login">Administración</a>
+			{% endif %}
 		</nav>
 	</header>
 
 	<main class="landing-wrap">
-		<section class="landing-hero" style="grid-template-columns: 1fr;">
-			<div class="landing-hero-copy">
-				<p class="landing-tagline">Bienvenido</p>
-				<h1>Elige un proyecto</h1>
-				<p>
-					Cada aplicación es independiente: su propio servidor, cuentas y datos.
-					Selecciona abajo a cuál quieres entrar.
-				</p>
-			</div>
+		<section class="landing-hero">
+			<p class="landing-tagline">Bienvenido</p>
+			<h1>Elige un proyecto</h1>
+			<p>Cada aplicación es independiente: su propio servidor, cuentas y datos. Selecciona abajo a cuál quieres entrar.</p>
 		</section>
 
 		<section aria-labelledby="proyectos-title">
@@ -35,9 +39,9 @@
 				{% for project in projects %}
 				<a class="proyecto-card" href="{{ project.url }}">
 					{% if project.icon %}
-					<img class="proyecto-card-icon" src="{{ project.icon }}" alt="" width="40" height="40"/>
+					<img class="proyecto-card-icon" src="{{ project.icon }}" alt="" width="38" height="38"/>
 					{% else %}
-					<div class="proyecto-card-icon proyecto-card-icon--placeholder" aria-hidden="true">$</div>
+					<div class="proyecto-card-icon proyecto-card-icon--placeholder" aria-hidden="true">{{ project.name[:1]|upper }}</div>
 					{% endif %}
 					<div class="proyecto-card-body">
 						<h3>{{ project.name }}</h3>
@@ -46,15 +50,19 @@
 					</div>
 				</a>
 				{% else %}
-				<p>No hay proyectos configurados en <code>projects.json</code>.</p>
+				<p class="empty-state">Aún no hay proyectos. Un administrador puede agregarlos desde el panel.</p>
 				{% endfor %}
 			</div>
 		</section>
 	</main>
 
 	<footer class="landing-footer">
-		<p>Servidor {{ public_host }} · Portal Docker · puerto 5005</p>
-		<p>Cada proyecto corre en su propio contenedor independiente.</p>
+		<p>Servidor {{ public_host }} · Portal · cada proyecto corre en su propio contenedor independiente.</p>
 	</footer>
+	<script>
+		window.addEventListener('pageshow', function (event) {
+			if (event.persisted) { window.location.reload(); }
+		});
+	</script>
 </body>
 </html>

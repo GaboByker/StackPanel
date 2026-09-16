@@ -1,0 +1,61 @@
+{% extends "base_admin.html" %}
+{% block title %}{{ db.dbname }}{% endblock %}
+{% block heading %}{{ db.dbname }} ({{ db.engine }}){% endblock %}
+{% block topbar_actions %}
+<a class="btn btn-secondary btn-sm" href="/admin/projects/{{ project.id }}">← {{ project.name }}</a>
+{% endblock %}
+{% block content %}
+
+<p class="admin-hint">
+	Esta conexión es de <strong>{{ 'lectura y escritura' if db.allow_write else 'solo lectura' }}</strong>.
+	{% if not db.allow_write %}Los comandos que modifican datos (INSERT/UPDATE/DELETE/...) se bloquean hasta que actives "permitir escritura" en la página del proyecto.{% endif %}
+</p>
+
+<div style="display:flex; gap:24px; flex-wrap:wrap;">
+	<div style="min-width:180px;">
+		<h2 class="landing-section-title">Tablas</h2>
+		{% if tables_error %}
+		<p class="empty-state">{{ tables_error }}</p>
+		{% else %}
+		<ul style="list-style:none; padding:0; margin:0;">
+			{% for t in tables %}
+			<li style="margin-bottom:4px;">
+				<a href="/admin/projects/{{ project.id }}/database/{{ db.id }}/view?table={{ t }}" class="{{ 'active' if t == table else '' }}">{{ t }}</a>
+			</li>
+			{% else %}
+			<li class="admin-hint">Sin tablas.</li>
+			{% endfor %}
+		</ul>
+		{% endif %}
+	</div>
+
+	<div style="flex:1; min-width:320px;">
+		<h2 class="landing-section-title">Consulta SQL</h2>
+		<form method="post">
+			<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+			<textarea name="sql" rows="4" style="width:100%; font-family:var(--mono); font-size:13px; padding:10px; border:1px solid var(--border); border-radius:var(--radius-sm);" placeholder="SELECT * FROM ...">{{ sql }}</textarea>
+			<div class="admin-actions">
+				<button type="submit" class="btn btn-primary btn-sm">Ejecutar</button>
+			</div>
+		</form>
+
+		{% if error %}
+		<div class="alert alert-error">{{ error }}</div>
+		{% elif columns is not none %}
+		<div class="admin-table-wrap">
+			<table class="admin-table">
+				<thead><tr>{% for c in columns %}<th>{{ c }}</th>{% endfor %}</tr></thead>
+				<tbody>
+					{% for row in rows %}
+					<tr>{% for value in row %}<td>{{ value }}</td>{% endfor %}</tr>
+					{% else %}
+					<tr><td colspan="{{ columns|length }}" class="htop-loading">Sin filas.</td></tr>
+					{% endfor %}
+				</tbody>
+			</table>
+		</div>
+		{% endif %}
+	</div>
+</div>
+
+{% endblock %}

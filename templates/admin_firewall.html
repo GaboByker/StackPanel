@@ -1,0 +1,98 @@
+{% extends "base_admin.html" %}
+{% block title %}Firewall{% endblock %}
+{% block heading %}Firewall{% endblock %}
+{% block content %}
+
+<p class="admin-hint">
+	El panel corre dentro de un contenedor Docker y, por diseño de seguridad, no tiene permiso para tocar el firewall del servidor directamente.
+	Esta página solo te muestra qué comando correr — cópialo y ejecútalo por SSH en el servidor (con <code>sudo</code>).
+</p>
+
+<article class="admin-service-card" style="max-width:680px; margin-bottom:24px;">
+	<div class="admin-service-head"><h3>Detectado en el servidor</h3></div>
+	<p><strong>UFW:</strong> activo, deniega todo el tráfico entrante por defecto salvo lo permitido explícitamente.</p>
+	<p><strong>fail2ban:</strong> activo, con jails <code>sshd</code>, <code>nginx-bad-request</code>, <code>nginx-botsearch</code>, <code>nginx-scanner</code> (bloquea IPs con comportamiento abusivo).</p>
+	<p class="admin-hint" style="margin:10px 0 0;">Para ver el estado real y actualizado en cualquier momento, corre por SSH:</p>
+	<p><code>sudo ufw status verbose</code> &nbsp; <code>sudo fail2ban-client status</code></p>
+</article>
+
+<p class="admin-hint">
+	<strong>Nota:</strong> Docker no pasa por UFW para sus puertos publicados, así que estos comandos no afectan a tus proyectos en contenedores (ya son accesibles desde internet igual). Solo sirven para algo que corra nativo en el host, sin Docker.
+</p>
+
+<h2 class="landing-section-title">Puertos de tus proyectos (informativo)</h2>
+<p class="admin-hint">Estos comandos solo tienen efecto real si alguna vez dejas de correr estos proyectos en Docker. Mientras estén en contenedores, ya son accesibles desde internet independientemente de esto.</p>
+<div class="admin-table-wrap">
+	<table class="admin-table">
+		<thead><tr><th>Proyecto</th><th>Puerto</th><th>Comando</th><th></th></tr></thead>
+		<tbody>
+			{% for p in port_projects %}
+			<tr>
+				<td>{{ p.name }}</td>
+				<td><code>{{ p.port }}</code></td>
+				<td><code class="fw-cmd" id="cmd-{{ p.id }}">sudo ufw allow {{ p.port }}/tcp</code></td>
+				<td><button type="button" class="btn btn-secondary btn-sm fw-copy" data-target="cmd-{{ p.id }}">Copiar</button></td>
+			</tr>
+			{% else %}
+			<tr><td colspan="4" class="htop-loading">No hay proyectos por puerto registrados.</td></tr>
+			{% endfor %}
+		</tbody>
+	</table>
+</div>
+
+<h2 class="landing-section-title" style="margin-top:28px;">Rango para apps de 1 clic (20000-20999)</h2>
+<p class="admin-hint">Cada vez que instalas una app con "⚡ Instalar app" se le asigna un puerto libre de este rango. Como esos contenedores publican el puerto igual que los demás, <strong>ya son accesibles desde internet en cuanto se crean</strong> — no necesitas abrir nada en ufw para eso. El comando de abajo solo tendría efecto si algún día corres algo en ese rango fuera de Docker.</p>
+<p><code class="fw-cmd" id="cmd-range">sudo ufw allow 20000:20999/tcp</code>
+	<button type="button" class="btn btn-secondary btn-sm fw-copy" data-target="cmd-range">Copiar</button>
+</p>
+
+<h2 class="landing-section-title" style="margin-top:28px;">Puerto personalizado</h2>
+<div class="form-row" style="max-width:420px; align-items:end;">
+	<div class="field" style="margin-bottom:0;">
+		<label for="custom-port">Puerto</label>
+		<input type="number" id="custom-port" min="1" max="65535" placeholder="5000"/>
+	</div>
+	<div class="field" style="margin-bottom:0;">
+		<label for="custom-proto">Protocolo</label>
+		<select id="custom-proto">
+			<option value="tcp">TCP</option>
+			<option value="udp">UDP</option>
+		</select>
+	</div>
+</div>
+<p style="margin-top:12px;">
+	<code class="fw-cmd" id="cmd-custom">sudo ufw allow &lt;puerto&gt;/tcp</code>
+	<button type="button" class="btn btn-secondary btn-sm fw-copy" data-target="cmd-custom">Copiar</button>
+</p>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+	document.querySelectorAll('.fw-copy').forEach(function (btn) {
+		btn.addEventListener('click', function () {
+			const el = document.getElementById(btn.dataset.target);
+			const text = el.textContent;
+			navigator.clipboard.writeText(text).then(function () {
+				const original = btn.textContent;
+				btn.textContent = 'Copiado ✓';
+				setTimeout(function () { btn.textContent = original; }, 1500);
+			}).catch(function () {
+				window.prompt('Copia manualmente:', text);
+			});
+		});
+	});
+
+	const portInput = document.getElementById('custom-port');
+	const protoSelect = document.getElementById('custom-proto');
+	const cmdCustom = document.getElementById('cmd-custom');
+	function updateCustom() {
+		const port = portInput.value || '<puerto>';
+		cmdCustom.textContent = 'sudo ufw allow ' + port + '/' + protoSelect.value;
+	}
+	portInput.addEventListener('input', updateCustom);
+	protoSelect.addEventListener('change', updateCustom);
+})();
+</script>
+{% endblock %}

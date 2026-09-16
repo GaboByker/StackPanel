@@ -1,0 +1,26 @@
+{% extends "base_admin.html" %}
+{% block title %}Instalar app{% endblock %}
+{% block heading %}Instalar app{% endblock %}
+{% block content %}
+
+<p class="admin-hint">Cada instalación crea su propio contenedor (o app + base de datos), con sus archivos en una carpeta nueva bajo <code>html/</code>, sin tocar los proyectos que ya están corriendo. Se te asigna un puerto libre automáticamente.</p>
+
+<div class="admin-services">
+	{% for key, tpl in templates.items() %}
+	<article class="admin-service-card">
+		<div class="admin-service-head">
+			<h3>{{ tpl.label }}</h3>
+		</div>
+		<p>{{ tpl.description }}</p>
+		<form method="post" action="/admin/projects/install/{{ key }}">
+			<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+			<div class="field" style="margin-bottom:10px;">
+				<input type="text" name="name" required placeholder="Nombre del proyecto" style="margin-bottom:0;"/>
+			</div>
+			<button type="submit" class="btn btn-primary btn-sm">Instalar {{ tpl.label }}</button>
+		</form>
+	</article>
+	{% endfor %}
+</div>
+
+{% endblock %}

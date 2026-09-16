@@ -1,261 +1,217 @@
-<!DOCTYPE html>
-<html lang="es">
-<head>
-	<meta charset="utf-8"/>
-	<meta name="viewport" content="width=device-width, initial-scale=1"/>
-	<title>Panel admin — Portal</title>
-	<link rel="stylesheet" href="/static/css/portal.css"/>
-</head>
-<body class="landing-page admin-page">
-	<header class="landing-topbar">
-		<div class="landing-topbar-brand">
-			<span>Panel de administración</span>
+{% extends "base_admin.html" %}
+{% block title %}Resumen{% endblock %}
+{% block heading %}Resumen{% endblock %}
+{% block content %}
+
+<h2 class="landing-section-title">Monitor del sistema</h2>
+<p class="admin-hint">Uso de CPU y memoria en tiempo real por proyecto (actualización cada 2 s).</p>
+
+<section class="htop-panel" id="htop-panel" aria-live="polite">
+	<div class="htop-header">
+		<span class="htop-title">htop — proyectos</span>
+		<span class="htop-clock" id="htop-clock">--:--:--</span>
+	</div>
+
+	<div class="htop-bars">
+		<div class="htop-bar-row">
+			<span class="htop-bar-label">CPU</span>
+			<div class="htop-bar-track"><div class="htop-bar-fill cpu" id="htop-cpu-bar" style="width:0%"></div></div>
+			<span class="htop-bar-value" id="htop-cpu-value">0%</span>
 		</div>
-		<nav>
-			<span class="admin-user">{{ current_admin.email }}</span>
-			<a href="/">Portal</a>
-			<a href="/admin/logout">Salir</a>
-		</nav>
-	</header>
-
-	<main class="landing-wrap">
-		{% with messages = get_flashed_messages(with_categories=true) %}
-			{% if messages %}
-				{% for category, message in messages %}
-				<div class="alert alert-{{ category }}">{{ message }}</div>
-				{% endfor %}
-			{% endif %}
-		{% endwith %}
-
-		<h2 class="landing-section-title">Monitor del sistema</h2>
-		<p class="admin-hint">Uso de CPU y memoria en tiempo real por proyecto (actualización cada 2 s).</p>
-
-		<section class="htop-panel" id="htop-panel" aria-live="polite">
-			<div class="htop-header">
-				<span class="htop-title">htop — proyectos</span>
-				<span class="htop-clock" id="htop-clock">--:--:--</span>
-			</div>
-
-			<div class="htop-bars">
-				<div class="htop-bar-row">
-					<span class="htop-bar-label">CPU</span>
-					<div class="htop-bar-track"><div class="htop-bar-fill cpu" id="htop-cpu-bar" style="width:0%"></div></div>
-					<span class="htop-bar-value" id="htop-cpu-value">0%</span>
-				</div>
-				<div class="htop-bar-row">
-					<span class="htop-bar-label">MEM</span>
-					<div class="htop-bar-track"><div class="htop-bar-fill mem" id="htop-mem-bar" style="width:0%"></div></div>
-					<span class="htop-bar-value" id="htop-mem-value">0 / 0</span>
-				</div>
-			</div>
-
-			<p class="htop-top" id="htop-top">Cargando métricas…</p>
-
-			<table class="htop-table">
-				<thead>
-					<tr>
-						<th>Proyecto</th>
-						<th>CPU%</th>
-						<th>MEM</th>
-						<th>MEM%</th>
-						<th>Contenedores</th>
-					</tr>
-				</thead>
-				<tbody id="htop-projects-body">
-					<tr><td colspan="5" class="htop-loading">Conectando…</td></tr>
-				</tbody>
-			</table>
-
-			<details class="htop-details">
-				<summary>Detalle por contenedor</summary>
-				<table class="htop-table htop-table-containers">
-					<thead>
-						<tr>
-							<th>Contenedor</th>
-							<th>Proyecto</th>
-							<th>CPU%</th>
-							<th>MEM</th>
-							<th>Estado</th>
-						</tr>
-					</thead>
-					<tbody id="htop-containers-body">
-						<tr><td colspan="5" class="htop-loading">—</td></tr>
-					</tbody>
-				</table>
-			</details>
-
-			<p class="htop-error" id="htop-error" hidden></p>
-		</section>
-
-		<h2 class="landing-section-title">Proyectos Docker</h2>
-		<p class="admin-hint">Iniciar o detener el <strong>contenedor completo</strong> de cada proyecto (aplicación + datos). Al detener, la base de datos en disco <strong>no se borra</strong> (permanece en <code>instance/</code>).</p>
-
-		<div class="admin-services">
-			{% for svc in services %}
-			<article class="admin-service-card">
-				<div class="admin-service-head">
-					<h3>{{ svc.label }}</h3>
-					<span class="status-pill {{ 'running' if svc.running else 'stopped' }}">
-						{% if svc.running %}En marcha{% elif svc.state == 'missing' %}No encontrado{% else %}Detenido{% endif %}
-					</span>
-				</div>
-				<p><strong>Contenedor{% if svc.containers|length > 1 %}es{% endif %}:</strong>
-					{% if svc.containers|length > 1 %}
-					<br>{% for c in svc.containers %}<code>{{ c }}</code>{% if not loop.last %}, {% endif %}{% endfor %}
-					{% else %}
-					<code>{{ svc.container }}</code>
-					{% endif %}
-				</p>
-				{% if svc.port %}
-				<p><strong>Puerto:</strong> <code>{{ public_host }}:{{ svc.port }}</code></p>
-				{% endif %}
-				<p><strong>Estado Docker:</strong> <code>{{ svc.state }}</code></p>
-				<p><strong>Datos persistentes:</strong> <code>{{ svc.database }}</code></p>
-				{% if svc.error %}
-				<p class="admin-service-error"><strong>Aviso:</strong> {{ svc.error }}</p>
-				{% endif %}
-				<div class="admin-actions">
-					{% if svc.running %}
-					<form method="post" action="/admin/containers/{{ svc.key }}/stop" onsubmit="return confirm('¿Detener {{ svc.label }}? La aplicación dejará de responder; los datos en disco se conservan.');">
-						<button type="submit" class="btn btn-danger">Detener proyecto</button>
-					</form>
-					{% else %}
-					<form method="post" action="/admin/containers/{{ svc.key }}/start">
-						<button type="submit" class="btn btn-primary">Iniciar proyecto</button>
-					</form>
-					{% endif %}
-				</div>
-			</article>
-			{% endfor %}
+		<div class="htop-bar-row">
+			<span class="htop-bar-label">MEM</span>
+			<div class="htop-bar-track"><div class="htop-bar-fill mem" id="htop-mem-bar" style="width:0%"></div></div>
+			<span class="htop-bar-value" id="htop-mem-value">0 / 0</span>
 		</div>
+		<div class="htop-bar-row">
+			<span class="htop-bar-label">DISCO</span>
+			<div class="htop-bar-track"><div class="htop-bar-fill disk" id="htop-disk-bar" style="width:0%"></div></div>
+			<span class="htop-bar-value" id="htop-disk-value">0 / 0</span>
+		</div>
+	</div>
 
-		<h2 class="landing-section-title">Administradores</h2>
-		<p class="admin-hint">Solo un administrador ya autenticado puede crear otros. No hay auto-registro.</p>
+	<p class="htop-top" id="htop-top">Cargando métricas…</p>
 
-		<table class="admin-table">
+	<table class="htop-table">
+		<thead>
+			<tr><th>Proyecto</th><th>CPU%</th><th>MEM</th><th>MEM%</th><th>Contenedores</th></tr>
+		</thead>
+		<tbody id="htop-projects-body">
+			<tr><td colspan="5" class="htop-loading">Conectando…</td></tr>
+		</tbody>
+	</table>
+
+	<details class="htop-details">
+		<summary>Detalle por contenedor</summary>
+		<table class="htop-table htop-table-containers">
 			<thead>
-				<tr>
-					<th>Correo</th>
-					<th>Creado</th>
-					<th>Creado por</th>
-				</tr>
+				<tr><th>Contenedor</th><th>Proyecto</th><th>CPU%</th><th>MEM</th><th>Estado</th></tr>
 			</thead>
-			<tbody>
-				{% for admin in admins %}
-				<tr>
-					<td>{{ admin.email }}</td>
-					<td>{{ admin.created_at[:19].replace('T', ' ') if admin.created_at else '—' }}</td>
-					<td>{{ admin.created_by_email or '—' }}</td>
-				</tr>
-				{% endfor %}
+			<tbody id="htop-containers-body">
+				<tr><td colspan="5" class="htop-loading">—</td></tr>
 			</tbody>
 		</table>
+	</details>
 
-		<p style="margin-top:16px;">
-			<a class="btn btn-secondary" href="/admin/admins/new">+ Crear administrador</a>
+	<p class="htop-error" id="htop-error" hidden></p>
+</section>
+
+<h2 class="landing-section-title">Proyectos Docker</h2>
+<p class="admin-hint">Iniciar o detener el <strong>contenedor completo</strong> de cada proyecto (aplicación + datos). Al detener, la base de datos en disco <strong>no se borra</strong>.</p>
+
+<div class="admin-services">
+	{% for svc in services %}
+	<article class="admin-service-card">
+		<div class="admin-service-head">
+			<h3>{{ svc.label }}</h3>
+			<span class="status-pill {{ 'running' if svc.running else 'stopped' }}">
+				{% if svc.running %}En marcha{% elif svc.state == 'missing' %}No encontrado{% else %}Detenido{% endif %}
+			</span>
+		</div>
+		<p><strong>Contenedor{% if svc.containers|length > 1 %}es{% endif %}:</strong>
+			{% if svc.containers|length > 1 %}
+			{% for c in svc.containers %}<code>{{ c }}</code>{% if not loop.last %} {% endif %}{% endfor %}
+			{% else %}
+			<code>{{ svc.container }}</code>
+			{% endif %}
 		</p>
-	</main>
+		{% if svc.port %}<p><strong>Puerto:</strong> <code>{{ public_host }}:{{ svc.port }}</code></p>{% endif %}
+		<p><strong>Estado Docker:</strong> <code>{{ svc.state }}</code></p>
+		<p><strong>Datos:</strong> <code>{{ svc.database }}</code></p>
+		{% if svc.error %}<p class="admin-service-error"><strong>Aviso:</strong> {{ svc.error }}</p>{% endif %}
+		<div class="admin-actions">
+			{% if svc.running %}
+			<form method="post" action="/admin/containers/{{ svc.key }}/stop" onsubmit="return confirm('¿Detener {{ svc.label }}? La aplicación dejará de responder; los datos en disco se conservan.');">
+				<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+				<button type="submit" class="btn btn-danger btn-sm">Detener</button>
+			</form>
+			{% else %}
+			<form method="post" action="/admin/containers/{{ svc.key }}/start">
+				<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+				<button type="submit" class="btn btn-primary btn-sm">Iniciar</button>
+			</form>
+			{% endif %}
+		</div>
+	</article>
+	{% endfor %}
+</div>
 
-	<script>
-	(function () {
-		const cpuBar = document.getElementById('htop-cpu-bar');
-		const memBar = document.getElementById('htop-mem-bar');
-		const cpuValue = document.getElementById('htop-cpu-value');
-		const memValue = document.getElementById('htop-mem-value');
-		const topLine = document.getElementById('htop-top');
-		const projectsBody = document.getElementById('htop-projects-body');
-		const containersBody = document.getElementById('htop-containers-body');
-		const clock = document.getElementById('htop-clock');
-		const errorEl = document.getElementById('htop-error');
+{% endblock %}
 
-		function barClass(percent, type) {
-			if (percent >= 85) return type + ' hot';
-			if (percent >= 60) return type + ' warm';
-			return type;
+{% block scripts %}
+<script>
+(function () {
+	const cpuBar = document.getElementById('htop-cpu-bar');
+	const memBar = document.getElementById('htop-mem-bar');
+	const diskBar = document.getElementById('htop-disk-bar');
+	const cpuValue = document.getElementById('htop-cpu-value');
+	const memValue = document.getElementById('htop-mem-value');
+	const diskValue = document.getElementById('htop-disk-value');
+	const topLine = document.getElementById('htop-top');
+	const projectsBody = document.getElementById('htop-projects-body');
+	const containersBody = document.getElementById('htop-containers-body');
+	const clock = document.getElementById('htop-clock');
+	const errorEl = document.getElementById('htop-error');
+
+	function barClass(percent, type) {
+		if (percent >= 85) return type + ' hot';
+		if (percent >= 60) return type + ' warm';
+		return type;
+	}
+
+	function render(data) {
+		const host = data.host || {};
+		const cpuPct = host.cpu_used_percent || 0;
+		const memPct = host.memory_used_percent || 0;
+
+		cpuBar.style.width = Math.min(cpuPct, 100) + '%';
+		cpuBar.className = 'htop-bar-fill ' + barClass(cpuPct, 'cpu');
+		cpuValue.textContent = cpuPct.toFixed(1) + '%';
+
+		memBar.style.width = Math.min(memPct, 100) + '%';
+		memBar.className = 'htop-bar-fill ' + barClass(memPct, 'mem');
+		memValue.textContent = (host.memory_used_human || '0 B') + ' / ' + (host.memory_total_human || '?');
+
+		const diskPct = host.disk_used_percent || 0;
+		diskBar.style.width = Math.min(diskPct, 100) + '%';
+		diskBar.className = 'htop-bar-fill ' + barClass(diskPct, 'disk');
+		diskValue.textContent = (host.disk_used_human || '0 B') + ' / ' + (host.disk_total_human || '?');
+
+		if (data.top_project) {
+			const t = data.top_project;
+			topLine.textContent = 'Mayor consumo: ' + t.label + ' — CPU ' + t.cpu_percent.toFixed(1) + '%, MEM ' + t.memory_human;
+		} else {
+			topLine.textContent = 'Sin contenedores en ejecución.';
 		}
 
-		function render(data) {
-			const host = data.host || {};
-			const cpuPct = host.cpu_used_percent || 0;
-			const memPct = host.memory_used_percent || 0;
-
-			cpuBar.style.width = Math.min(cpuPct, 100) + '%';
-			cpuBar.className = 'htop-bar-fill ' + barClass(cpuPct, 'cpu');
-			cpuValue.textContent = cpuPct.toFixed(1) + '%';
-
-			memBar.style.width = Math.min(memPct, 100) + '%';
-			memBar.className = 'htop-bar-fill ' + barClass(memPct, 'mem');
-			memValue.textContent = (host.memory_used_human || '0 B') + ' / ' + (host.memory_total_human || '?');
-
-			if (data.top_project) {
-				const t = data.top_project;
-				topLine.textContent = 'Mayor consumo: ' + t.label + ' — CPU ' + t.cpu_percent.toFixed(1) + '%, MEM ' + t.memory_human;
-			} else {
-				topLine.textContent = 'Sin contenedores en ejecución.';
-			}
-
-			const projects = data.projects || [];
-			if (!projects.length) {
-				projectsBody.innerHTML = '<tr><td colspan="5" class="htop-loading">Sin datos</td></tr>';
-			} else {
-				projectsBody.innerHTML = projects.map(function (p, i) {
-					const top = i === 0 ? ' class="htop-row-top"' : '';
-					return '<tr' + top + '>' +
-						'<td>' + escapeHtml(p.label) + '</td>' +
-						'<td>' + p.cpu_percent.toFixed(1) + '</td>' +
-						'<td>' + escapeHtml(p.memory_human) + '</td>' +
-						'<td>' + p.memory_percent.toFixed(1) + '</td>' +
-						'<td>' + p.running + '/' + p.total + '</td>' +
-						'</tr>';
-				}).join('');
-			}
-
-			const containers = data.containers || [];
-			if (!containers.length) {
-				containersBody.innerHTML = '<tr><td colspan="5" class="htop-loading">—</td></tr>';
-			} else {
-				containersBody.innerHTML = containers.map(function (c) {
-					return '<tr>' +
-						'<td><code>' + escapeHtml(c.name) + '</code></td>' +
-						'<td>' + escapeHtml(c.project_label || c.project) + '</td>' +
-						'<td>' + (c.cpu_percent || 0).toFixed(1) + '</td>' +
-						'<td>' + escapeHtml(c.memory_human || '0 B') + '</td>' +
-						'<td>' + escapeHtml(c.state || '?') + '</td>' +
-						'</tr>';
-				}).join('');
-			}
-
-			if (data.errors && data.errors.length) {
-				errorEl.hidden = false;
-				errorEl.textContent = data.errors.join(' · ');
-			} else {
-				errorEl.hidden = true;
-			}
-
-			const now = new Date();
-			clock.textContent = now.toLocaleTimeString('es-ES');
+		const projects = data.projects || [];
+		if (!projects.length) {
+			projectsBody.innerHTML = '<tr><td colspan="5" class="htop-loading">Sin datos</td></tr>';
+		} else {
+			projectsBody.innerHTML = projects.map(function (p, i) {
+				const top = i === 0 ? ' class="htop-row-top"' : '';
+				return '<tr' + top + '>' +
+					'<td>' + escapeHtml(p.label) + '</td>' +
+					'<td>' + p.cpu_percent.toFixed(1) + '</td>' +
+					'<td>' + escapeHtml(p.memory_human) + '</td>' +
+					'<td>' + p.memory_percent.toFixed(1) + '</td>' +
+					'<td>' + p.running + '/' + p.total + '</td>' +
+					'</tr>';
+			}).join('');
 		}
 
-		function escapeHtml(text) {
-			const d = document.createElement('div');
-			d.textContent = text == null ? '' : String(text);
-			return d.innerHTML;
+		const containers = data.containers || [];
+		if (!containers.length) {
+			containersBody.innerHTML = '<tr><td colspan="5" class="htop-loading">—</td></tr>';
+		} else {
+			containersBody.innerHTML = containers.map(function (c) {
+				return '<tr>' +
+					'<td><code>' + escapeHtml(c.name) + '</code></td>' +
+					'<td>' + escapeHtml(c.project_label || c.project) + '</td>' +
+					'<td>' + (c.cpu_percent || 0).toFixed(1) + '</td>' +
+					'<td>' + escapeHtml(c.memory_human || '0 B') + '</td>' +
+					'<td>' + escapeHtml(c.state || '?') + '</td>' +
+					'</tr>';
+			}).join('');
 		}
 
-		async function poll() {
-			try {
-				const res = await fetch('/admin/api/metrics', { credentials: 'same-origin' });
-				if (!res.ok) throw new Error('HTTP ' + res.status);
-				render(await res.json());
-			} catch (err) {
-				errorEl.hidden = false;
-				errorEl.textContent = 'Error al obtener métricas: ' + err.message;
-			}
+		if (data.errors && data.errors.length) {
+			errorEl.hidden = false;
+			errorEl.textContent = data.errors.join(' · ');
+		} else {
+			errorEl.hidden = true;
 		}
 
-		poll();
-		setInterval(poll, 2000);
-	})();
-	</script>
-</body>
-</html>
+		clock.textContent = new Date().toLocaleTimeString('es-ES');
+	}
+
+	function escapeHtml(text) {
+		const d = document.createElement('div');
+		d.textContent = text == null ? '' : String(text);
+		return d.innerHTML;
+	}
+
+	let pollTimer = null;
+
+	async function poll() {
+		try {
+			const res = await fetch('/admin/api/metrics', { credentials: 'same-origin' });
+			if (!res.ok) throw new Error('HTTP ' + res.status);
+			render(await res.json());
+		} catch (err) {
+			errorEl.hidden = false;
+			errorEl.textContent = 'Error al obtener métricas: ' + err.message;
+		}
+	}
+
+	poll();
+	pollTimer = setInterval(poll, 2000);
+
+	document.querySelectorAll('.logout-form').forEach(function (form) {
+		form.addEventListener('submit', function () {
+			if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+		});
+	});
+})();
+</script>
+{% endblock %}

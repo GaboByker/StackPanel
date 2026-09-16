@@ -1,0 +1,76 @@
+{% extends "base_admin.html" %}
+{% block title %}Notificaciones{% endblock %}
+{% block heading %}Notificaciones{% endblock %}
+{% block content %}
+
+<p class="admin-hint">Configura tus propios canales. Nada se envía a menos que actives la casilla del canal y la del tipo de aviso.</p>
+
+<form method="post" style="max-width:620px;">
+	<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+
+	<article class="admin-service-card" style="margin-bottom:16px;">
+		<div class="admin-service-head"><h3>Discord</h3></div>
+		<label class="checkbox-row" style="margin-bottom:10px;">
+			<input type="checkbox" name="discord_enabled" {{ 'checked' if cfg.discord_enabled == '1' else '' }}/> Activar Discord
+		</label>
+		<div class="field">
+			<label>Webhook URL</label>
+			<input type="text" name="discord_webhook_url" value="{{ cfg.discord_webhook_url }}" placeholder="https://discord.com/api/webhooks/..."/>
+		</div>
+	</article>
+
+	<article class="admin-service-card" style="margin-bottom:16px;">
+		<div class="admin-service-head"><h3>Slack</h3></div>
+		<label class="checkbox-row" style="margin-bottom:10px;">
+			<input type="checkbox" name="slack_enabled" {{ 'checked' if cfg.slack_enabled == '1' else '' }}/> Activar Slack
+		</label>
+		<div class="field">
+			<label>Webhook URL</label>
+			<input type="text" name="slack_webhook_url" value="{{ cfg.slack_webhook_url }}" placeholder="https://hooks.slack.com/services/..."/>
+		</div>
+	</article>
+
+	<article class="admin-service-card" style="margin-bottom:16px;">
+		<div class="admin-service-head"><h3>Email (SMTP)</h3></div>
+		<label class="checkbox-row" style="margin-bottom:10px;">
+			<input type="checkbox" name="smtp_enabled" {{ 'checked' if cfg.smtp_enabled == '1' else '' }}/> Activar email
+		</label>
+		<div class="form-row">
+			<div class="field"><label>Host SMTP</label><input type="text" name="smtp_host" value="{{ cfg.smtp_host }}" placeholder="smtp.gmail.com"/></div>
+			<div class="field"><label>Puerto</label><input type="number" name="smtp_port" value="{{ cfg.smtp_port }}" placeholder="587"/></div>
+		</div>
+		<div class="form-row">
+			<div class="field"><label>Usuario</label><input type="text" name="smtp_user" value="{{ cfg.smtp_user }}"/></div>
+			<div class="field"><label>Contraseña</label><input type="password" name="smtp_password" value="{{ cfg.smtp_password }}"/></div>
+		</div>
+		<div class="form-row">
+			<div class="field"><label>De (from)</label><input type="text" name="smtp_from" value="{{ cfg.smtp_from }}"/></div>
+			<div class="field"><label>Para (to)</label><input type="text" name="smtp_to" value="{{ cfg.smtp_to }}"/></div>
+		</div>
+		<label class="checkbox-row">
+			<input type="checkbox" name="smtp_use_tls" {{ 'checked' if cfg.smtp_use_tls == '1' else '' }}/> Usar STARTTLS
+		</label>
+	</article>
+
+	<article class="admin-service-card" style="margin-bottom:16px;">
+		<div class="admin-service-head"><h3>Qué avisar</h3></div>
+		<label class="checkbox-row" style="margin-bottom:8px;">
+			<input type="checkbox" name="notify_project_down" {{ 'checked' if cfg.notify_project_down == '1' else '' }}/> Un proyecto se cae inesperadamente
+		</label>
+		<label class="checkbox-row" style="margin-bottom:8px;">
+			<input type="checkbox" name="notify_disk_full" {{ 'checked' if cfg.notify_disk_full == '1' else '' }}/> Disco por encima del 90%
+		</label>
+		<label class="checkbox-row">
+			<input type="checkbox" name="notify_ssl_expiring" {{ 'checked' if cfg.notify_ssl_expiring == '1' else '' }}/> Certificado SSL vence en menos de 14 días
+		</label>
+	</article>
+
+	<button type="submit" class="btn btn-primary">Guardar</button>
+</form>
+
+<form method="post" action="/admin/notifications/test" style="margin-top:14px;">
+	<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+	<button type="submit" class="btn btn-secondary">Enviar prueba a los canales activados</button>
+</form>
+
+{% endblock %}

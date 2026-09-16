@@ -1,0 +1,51 @@
+{% extends "base_admin.html" %}
+{% block title %}Archivos{% endblock %}
+{% block heading %}Archivos{% endblock %}
+{% block content %}
+
+<p class="admin-hint">
+	<code>html/{{ subpath }}</code> — solo se puede navegar y editar dentro de los proyectos (html/). El panel y el proxy no son accesibles aquí.
+</p>
+
+{% if subpath %}
+<p><a href="/admin/files/{{ parent }}">← Subir un nivel</a></p>
+{% endif %}
+
+{% if mode == 'dir' %}
+<div class="admin-table-wrap">
+	<table class="admin-table">
+		<thead><tr><th>Nombre</th><th>Tamaño</th></tr></thead>
+		<tbody>
+			{% for e in entries %}
+			<tr>
+				<td>
+					{% set href = (subpath + '/' + e.name|urlencode) if subpath else e.name|urlencode %}
+					{% if e.is_dir %}
+					<a href="/admin/files/{{ href }}">📁 {{ e.name }}/</a>
+					{% else %}
+					<a href="/admin/files/{{ href }}">📄 {{ e.name }}</a>
+					{% endif %}
+				</td>
+				<td>{{ '—' if e.is_dir else (e.size|filesizeformat) }}</td>
+			</tr>
+			{% else %}
+			<tr><td colspan="2" class="htop-loading">Carpeta vacía.</td></tr>
+			{% endfor %}
+		</tbody>
+	</table>
+</div>
+{% else %}
+	{% if file_error %}
+	<div class="alert alert-error">{{ file_error }}</div>
+	{% else %}
+	<form method="post">
+		<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+		<textarea name="content" spellcheck="false" style="width:100%; min-height:60vh; font-family:var(--mono); font-size:13px; padding:14px; border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--surface); color:var(--text); resize:vertical;">{{ content }}</textarea>
+		<div class="admin-actions">
+			<button type="submit" class="btn btn-primary">Guardar</button>
+		</div>
+	</form>
+	{% endif %}
+{% endif %}
+
+{% endblock %}

@@ -1,0 +1,28 @@
+{% extends "base_admin.html" %}
+{% block title %}Grafos{% endblock %}
+{% block heading %}Grafos Graphify{% endblock %}
+{% block content %}
+
+<p class="admin-hint">Visualización privada de cada proyecto. No aparece en el portal público.</p>
+
+{% if graphs %}
+<div class="proyectos-grid">
+	{% for g in graphs %}
+	<article class="proyecto-card" style="cursor:default;">
+		<div class="proyecto-card-icon proyecto-card-icon--placeholder" aria-hidden="true">◈</div>
+		<div class="proyecto-card-body">
+			<h3>{{ g.name }}</h3>
+			<p><code>{{ g.folder }}/graphify-out</code></p>
+			<p style="margin-top:10px;">
+				<a class="proyecto-card-link" href="{{ g.url }}" target="_blank" rel="noopener">Abrir grafo →</a>
+				{% if g.report_url %} · <a href="{{ g.report_url }}" target="_blank" rel="noopener">Reporte</a>{% endif %}
+			</p>
+		</div>
+	</article>
+	{% endfor %}
+</div>
+{% else %}
+<p class="empty-state">No hay grafos generados. En el servidor: <code>graphify update .</code> dentro de cada proyecto.</p>
+{% endif %}
+
+{% endblock %}

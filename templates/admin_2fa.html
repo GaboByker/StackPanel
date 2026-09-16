@@ -1,0 +1,37 @@
+{% extends "base_admin.html" %}
+{% block title %}Verificación en dos pasos{% endblock %}
+{% block heading %}Verificación en dos pasos (2FA){% endblock %}
+{% block content %}
+
+{% if error %}<div class="alert alert-error">{{ error }}</div>{% endif %}
+
+{% if enabled %}
+<p class="admin-hint">La verificación en dos pasos está <strong>activada</strong> para tu cuenta.</p>
+<form method="post" onsubmit="return confirm('¿Desactivar la verificación en dos pasos?');">
+	<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+	<input type="hidden" name="action" value="disable"/>
+	<button type="submit" class="btn btn-danger">Desactivar 2FA</button>
+</form>
+{% elif secret %}
+<p class="admin-hint">Escanea esto con Google Authenticator, Authy o similar (o ingresa la clave manualmente), luego confirma con el código de 6 dígitos.</p>
+<p><strong>Clave manual:</strong> <code>{{ secret }}</code></p>
+<p><strong>URI:</strong> <code style="word-break:break-all;">{{ otpauth_uri }}</code></p>
+<form method="post" style="max-width:320px;">
+	<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+	<input type="hidden" name="action" value="confirm"/>
+	<div class="field">
+		<label for="code">Código de la app</label>
+		<input type="text" id="code" name="code" inputmode="numeric" maxlength="6" required autofocus/>
+	</div>
+	<button type="submit" class="btn btn-primary">Activar 2FA</button>
+</form>
+{% else %}
+<p class="admin-hint">Agrega una capa extra de seguridad al login: además de tu contraseña, se pedirá un código de tu teléfono.</p>
+<form method="post">
+	<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+	<input type="hidden" name="action" value="generate"/>
+	<button type="submit" class="btn btn-primary">Configurar 2FA</button>
+</form>
+{% endif %}
+
+{% endblock %}

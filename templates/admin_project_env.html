@@ -1,0 +1,41 @@
+{% extends "base_admin.html" %}
+{% block title %}Variables de entorno · {{ project.name }}{% endblock %}
+{% block heading %}Variables de entorno — {{ project.name }}{% endblock %}
+{% block topbar_actions %}
+<a class="btn btn-secondary btn-sm" href="/admin/projects/{{ project.id }}">← {{ project.name }}</a>
+{% endblock %}
+{% block content %}
+
+<p class="admin-hint">Edita el <code>.env</code> de este proyecto. Reinicia el proyecto (Detener/Iniciar en Proyectos) para que los cambios tomen efecto.</p>
+{% if error %}<div class="alert alert-error">{{ error }}</div>{% endif %}
+
+<form method="post" id="env-form">
+	<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+	<div id="env-rows">
+		{% for key, value in env_vars %}
+		<div class="form-row" style="margin-bottom:8px;">
+			<input type="text" name="key" value="{{ key }}" placeholder="NOMBRE_VARIABLE"/>
+			<input type="text" name="value" value="{{ value }}" placeholder="valor"/>
+		</div>
+		{% endfor %}
+	</div>
+	<button type="button" class="btn btn-secondary btn-sm" id="env-add">+ Agregar variable</button>
+	<div class="admin-actions">
+		<button type="submit" class="btn btn-primary">Guardar</button>
+	</div>
+</form>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.getElementById('env-add').addEventListener('click', function () {
+	const row = document.createElement('div');
+	row.className = 'form-row';
+	row.style.marginBottom = '8px';
+	row.innerHTML = '<input type="text" name="key" placeholder="NOMBRE_VARIABLE"/>' +
+		'<input type="text" name="value" placeholder="valor"/>';
+	document.getElementById('env-rows').appendChild(row);
+});
+</script>
+{% endblock %}

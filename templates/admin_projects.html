@@ -1,0 +1,116 @@
+{% extends "base_admin.html" %}
+{% block title %}Proyectos{% endblock %}
+{% block heading %}Proyectos{% endblock %}
+{% block topbar_actions %}
+<div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+	<div class="view-switch" role="group" aria-label="Vista">
+		<button type="button" class="view-switch-btn" data-view="cards" title="Tarjetas">▦</button>
+		<button type="button" class="view-switch-btn" data-view="list" title="Lista">☰</button>
+	</div>
+	<div class="admin-actions" style="margin:0;">
+		<a class="btn btn-secondary btn-sm" href="/admin/projects/scan">Escanear html/</a>
+		<a class="btn btn-secondary btn-sm" href="/admin/projects/restore">Restaurar backup</a>
+		<a class="btn btn-secondary btn-sm" href="/admin/projects/install">⚡ Instalar app</a>
+		<a class="btn btn-primary btn-sm" href="/admin/projects/new">+ Nuevo proyecto</a>
+	</div>
+</div>
+{% endblock %}
+{% block content %}
+
+<p class="admin-hint">Estas son las tarjetas que ven los visitantes en el portal público. Para backups, base de datos, variables de entorno, límites y más, entra a "Detalles".</p>
+
+{% if projects %}
+<div class="admin-services" id="projects-cards">
+	{% for p in projects %}
+	<article class="admin-service-card">
+		<div class="admin-service-head">
+			<h3><a href="/admin/projects/{{ p.db_id }}" style="color:inherit; text-decoration:none;">{{ p.name }}</a></h3>
+			{% if p.docker_status %}
+			<span class="status-pill {{ 'running' if p.docker_status.running else 'stopped' }}">
+				{{ 'En marcha' if p.docker_status.running else p.docker_status.state }}
+			</span>
+			{% else %}
+			<span class="status-pill custom">{{ 'Dominio propio' if p.access_mode == 'domain' else 'Por puerto' }}</span>
+			{% endif %}
+		</div>
+		<p>{{ p.description or '—' }}</p>
+		<p><strong>URL:</strong> <code>{{ p.url }}</code></p>
+		{% if p.db_count %}<p><span class="status-pill running">🗄 {{ p.db_count }} BD conectada{{ 's' if p.db_count > 1 else '' }}</span></p>{% endif %}
+		<div class="admin-actions">
+			<a class="btn btn-secondary btn-sm" href="{{ p.url }}" target="_blank" rel="noopener">Abrir ↗</a>
+			{% if p.containers %}
+				{% if p.docker_status and p.docker_status.running %}
+				<form method="post" action="/admin/projects/{{ p.db_id }}/stop" style="display:inline;" onsubmit="return confirm('¿Detener {{ p.name }}?');">
+					<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+					<button type="submit" class="btn btn-danger btn-sm">Detener</button>
+				</form>
+				{% else %}
+				<form method="post" action="/admin/projects/{{ p.db_id }}/start" style="display:inline;">
+					<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+					<button type="submit" class="btn btn-primary btn-sm">Iniciar</button>
+				</form>
+				{% endif %}
+			{% endif %}
+			<a class="btn btn-secondary btn-sm" href="/admin/projects/{{ p.db_id }}">Detalles</a>
+		</div>
+	</article>
+	{% endfor %}
+</div>
+
+<div class="admin-table-wrap" id="projects-list" style="display:none;">
+	<table class="admin-table">
+		<thead><tr><th>Proyecto</th><th>Estado</th><th>URL</th><th>BD</th><th></th></tr></thead>
+		<tbody>
+			{% for p in projects %}
+			<tr>
+				<td><a href="/admin/projects/{{ p.db_id }}">{{ p.name }}</a></td>
+				<td>
+					{% if p.docker_status %}
+					<span class="status-pill {{ 'running' if p.docker_status.running else 'stopped' }}">{{ 'En marcha' if p.docker_status.running else p.docker_status.state }}</span>
+					{% else %}
+					<span class="status-pill custom">{{ 'Dominio' if p.access_mode == 'domain' else 'Puerto' }}</span>
+					{% endif %}
+				</td>
+				<td><code>{{ p.url }}</code></td>
+				<td>{{ '🗄 ' ~ p.db_count if p.db_count else '—' }}</td>
+				<td style="white-space:nowrap;">
+					<a class="btn btn-secondary btn-sm" href="{{ p.url }}" target="_blank" rel="noopener">Abrir</a>
+					<a class="btn btn-secondary btn-sm" href="/admin/projects/{{ p.db_id }}">Detalles</a>
+				</td>
+			</tr>
+			{% endfor %}
+		</tbody>
+	</table>
+</div>
+{% else %}
+<p class="empty-state">Aún no hay proyectos registrados. Usa "+ Nuevo proyecto" para publicar el primero.</p>
+{% endif %}
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+	const cards = document.getElementById('projects-cards');
+	const list = document.getElementById('projects-list');
+	const buttons = document.querySelectorAll('.view-switch-btn');
+
+	function apply(view) {
+		cards.style.display = view === 'cards' ? '' : 'none';
+		list.style.display = view === 'list' ? '' : 'none';
+		buttons.forEach(function (b) { b.classList.toggle('active', b.dataset.view === view); });
+	}
+
+	let saved = 'cards';
+	try { saved = localStorage.getItem('projects-view') || 'cards'; } catch (e) {}
+	apply(saved);
+
+	buttons.forEach(function (btn) {
+		btn.addEventListener('click', function () {
+			try { localStorage.setItem('projects-view', btn.dataset.view); } catch (e) {}
+			apply(btn.dataset.view);
+		});
+	});
+})();
+</script>
+{% endblock %}

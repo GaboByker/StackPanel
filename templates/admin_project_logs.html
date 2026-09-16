@@ -1,0 +1,28 @@
+{% extends "base_admin.html" %}
+{% block title %}Logs · {{ project.name }}{% endblock %}
+{% block heading %}Logs — {{ project.name }}{% endblock %}
+{% block topbar_actions %}
+<a class="btn btn-secondary btn-sm" href="/admin/projects/{{ project.id }}">← {{ project.name }}</a>
+{% endblock %}
+{% block content %}
+
+{% if containers|length > 1 %}
+<div class="field" style="max-width:320px;">
+	<label>Contenedor</label>
+	<select onchange="window.location='/admin/projects/{{ project.id }}/logs?container=' + this.value">
+		{% for c in containers %}
+		<option value="{{ c }}" {{ 'selected' if c == selected else '' }}>{{ c }}</option>
+		{% endfor %}
+	</select>
+</div>
+{% endif %}
+
+{% if error %}
+<p class="empty-state">{{ error }}</p>
+{% else %}
+<pre style="background:#0d1117; color:#c9d1d9; padding:16px; border-radius:var(--radius); overflow:auto; max-height:75vh; font-size:12.5px; font-family:var(--mono); white-space:pre-wrap;">{{ logs }}</pre>
+{% endif %}
+
+<p style="margin-top:14px;"><a class="btn btn-secondary btn-sm" href="/admin/projects/{{ project.id }}/logs?container={{ selected }}">Actualizar</a></p>
+
+{% endblock %}

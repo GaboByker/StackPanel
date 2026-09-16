@@ -1,0 +1,30 @@
+{% extends "base_admin.html" %}
+{% block title %}Restaurar backup{% endblock %}
+{% block heading %}Restaurar backup{% endblock %}
+{% block content %}
+
+<p class="admin-hint">Sube un <code>.tar.gz</code> generado con el botón "Backup" de un proyecto. Solo se puede recrear automáticamente si ese proyecto se instaló con "⚡ Instalar app" (WordPress, sitio estático, Flask o Node); backups de proyectos que ya venían con el servidor sirven para recuperar archivos manualmente, pero no arrancan solos.</p>
+
+{% if error %}
+<div class="alert alert-error">{{ error }}</div>
+{% endif %}
+
+<form method="post" enctype="multipart/form-data" style="max-width:480px;">
+	<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+	<div class="field">
+		<label for="name">Nombre del nuevo proyecto</label>
+		<input type="text" id="name" name="name" required/>
+	</div>
+	<div class="field">
+		<label for="description">Descripción (opcional)</label>
+		<input type="text" id="description" name="description"/>
+	</div>
+	<div class="field">
+		<label for="backup_file">Archivo de backup (.tar.gz)</label>
+		<input type="file" id="backup_file" name="backup_file" accept=".gz,.tar.gz" required/>
+	</div>
+	<button type="submit" class="btn btn-primary">Restaurar</button>
+	<a class="btn btn-secondary" href="/admin/projects">Cancelar</a>
+</form>
+
+{% endblock %}

@@ -1,2 +1,6 @@
 flask>=3.0
 waitress>=3.0
+flask-wtf>=1.2
+pyotp>=2.9
+pymysql>=1.1
+psycopg2-binary>=2.9

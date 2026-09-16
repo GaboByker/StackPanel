@@ -1,0 +1,48 @@
+{% extends "base_admin.html" %}
+{% block title %}Escanear html/{% endblock %}
+{% block heading %}Escanear html/{% endblock %}
+{% block content %}
+
+<p class="admin-hint">Carpetas dentro de <code>html/</code> que no están registradas en el panel (por ejemplo, algo que subiste por SSH). Los proyectos que ya están agregados no aparecen aquí y no se tocan.</p>
+
+{% if candidates %}
+<div class="admin-services">
+	{% for c in candidates %}
+	<article class="admin-service-card">
+		<div class="admin-service-head">
+			<h3>{{ c.dir_name }}</h3>
+			{% if c.containers %}
+			<span class="status-pill {{ 'running' if c.running else 'stopped' }}">
+				{{ 'Corriendo' if c.running else 'Detenido' }}
+			</span>
+			{% endif %}
+		</div>
+		<p><strong>Carpeta:</strong> <code>{{ c.folder }}</code></p>
+		{% if c.containers %}
+		<p><strong>Contenedores detectados:</strong> {% for name in c.containers %}<code>{{ name }}</code>{% if not loop.last %} {% endif %}{% endfor %}</p>
+		{% else %}
+		<p class="admin-hint" style="margin:0 0 10px;">No se detectaron contenedores corriendo con ese nombre. Complétalo a mano si aplica.</p>
+		{% endif %}
+
+		<form method="post" action="/admin/projects/scan/import">
+			<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+			<input type="hidden" name="folder" value="{{ c.folder }}"/>
+			<input type="hidden" name="containers" value="{{ c.containers|join(',') }}"/>
+			<div class="field">
+				<label>Nombre</label>
+				<input type="text" name="name" value="{{ c.name_guess }}" required/>
+			</div>
+			<div class="field">
+				<label>Puerto</label>
+				<input type="number" name="port" min="1" max="65535" value="{{ c.port_guess or '' }}" required/>
+			</div>
+			<button type="submit" class="btn btn-primary btn-sm">Agregar al portal</button>
+		</form>
+	</article>
+	{% endfor %}
+</div>
+{% else %}
+<p class="empty-state">No hay carpetas nuevas en html/ — todo lo que existe ya está registrado.</p>
+{% endif %}
+
+{% endblock %}

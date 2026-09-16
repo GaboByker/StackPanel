@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+	<meta charset="utf-8"/>
+	<meta name="viewport" content="width=device-width, initial-scale=1"/>
+	<title>Verificación en dos pasos — Panel</title>
+	<meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate"/>
+	<link rel="stylesheet" href="/static/css/portal.css"/>
+</head>
+<body class="auth-shell">
+	<div class="auth-card">
+		<h1>Verificación en dos pasos</h1>
+		<p class="auth-subtitle">Ingresa el código de 6 dígitos de tu app de autenticación.</p>
+		{% if error %}<div class="alert alert-error">{{ error }}</div>{% endif %}
+		<form method="post">
+			<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+			<div class="field">
+				<label for="code">Código</label>
+				<input type="text" id="code" name="code" inputmode="numeric" pattern="[0-9]*" maxlength="6" required autofocus/>
+			</div>
+			<button type="submit" class="btn btn-primary">Verificar</button>
+		</form>
+		<p class="auth-footer"><a href="/admin/login">← Volver</a></p>
+	</div>
+</body>
+</html>

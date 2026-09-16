@@ -2,24 +2,55 @@ import http.client
 import json
 import os
 import socket
+import struct
 import urllib.error
 import urllib.request
 
 DOCKER_SOCK = os.environ.get('DOCKER_SOCK', '/var/run/docker.sock')
 
 MANAGED_SERVICES = {
+    'social-hub': {
+        'containers': ['social-hub'],
+        'label': 'Social Hub',
+        'database': 'html/social-hub/instance/hub.db',
+        'port': 5000,
+        'health_path': '/login.html',
+    },
     'empires': {
         'containers': ['empires-allies'],
         'label': 'Empires & Allies',
-        'database': 'Empires-Allies/instance/save.db',
+        'database': 'html/Empires-Allies/instance/save.db',
         'port': 5006,
         'health_path': '/',
+    },
+    'social-empires': {
+        'containers': ['social-empires'],
+        'label': 'Social Empires',
+        'database': 'html/social-empires/saves',
+        'port': 5051,
+        'health_path': '/',
+    },
+    'torres': {
+        'containers': ['torres-db', 'torres-arquitectura'],
+        'label': 'Torres Arquitectura (WordPress)',
+        'database': 'html/torres-arquitectura/db-data + wp-content',
+        'port': 5007,
+        'health_path': '/',
+        'start_order': ['torres-db', 'torres-arquitectura'],
+        'stop_order': ['torres-arquitectura', 'torres-db'],
     },
     'finanzas': {
         'containers': ['finanzas-personales'],
         'label': 'Finanzas Personales',
-        'database': 'finanzas-personales/instance/finanzas.db',
+        'database': 'html/finanzas-personales/instance/finanzas.db',
         'port': 5050,
+        'health_path': '/',
+    },
+    'contactos': {
+        'containers': ['limpieza-contactos'],
+        'label': 'Limpieza de Contactos',
+        'database': 'html/limpieza-contactos/instance',
+        'port': 5052,
         'health_path': '/',
     },
     'wapicenter': {
@@ -32,7 +63,7 @@ MANAGED_SERVICES = {
         'container_prefixes': ['wapicenter-worker'],
         'compose_project': 'wapicenter',
         'label': 'WApiCenter',
-        'database': 'WApiCenter (volumen postgres_data)',
+        'database': 'html/WApiCenter (volumen postgres_data)',
         'port': 8090,
         'health_path': '/',
         'start_order': [
@@ -45,6 +76,46 @@ MANAGED_SERVICES = {
             'wapicenter-api',
             'wapicenter-redis',
             'wapicenter-postgres',
+        ],
+    },
+    'gemma4': {
+        'containers': ['gemma4-ollama', 'gemma4-api-manager'],
+        'label': 'API Manager IA',
+        'database': 'html/gemma4-api-manager/data/gemma4_manager.db',
+        'port': 8070,
+        'health_path': '/health',
+        'start_order': ['gemma4-ollama', 'gemma4-api-manager'],
+        'stop_order': ['gemma4-api-manager', 'gemma4-ollama'],
+    },
+    'proxy': {
+        'containers': ['proxy', 'proxy-certbot'],
+        'label': 'Proxy Nginx (dominios + SSL)',
+        'database': 'proxy/sites (config), volumen proxy-certbot-etc (certificados)',
+        'port': None,
+        'health_path': '/',
+        'start_order': ['proxy-certbot', 'proxy'],
+        'stop_order': ['proxy', 'proxy-certbot'],
+    },
+    'wanqara-dashboard': {
+        'containers': [
+            'wanqara-dashboard-db-1',
+            'wanqara-dashboard-backend-1',
+            'wanqara-dashboard-frontend-1',
+        ],
+        'compose_project': 'wanqara-dashboard',
+        'label': 'Wanqara Dashboard',
+        'database': 'html/wanqara-dashboard (volumen db_data + upload_data)',
+        'port': 5173,
+        'health_path': '/',
+        'start_order': [
+            'wanqara-dashboard-db-1',
+            'wanqara-dashboard-backend-1',
+            'wanqara-dashboard-frontend-1',
+        ],
+        'stop_order': [
+            'wanqara-dashboard-frontend-1',
+            'wanqara-dashboard-backend-1',
+            'wanqara-dashboard-db-1',
         ],
     },
 }
@@ -329,6 +400,113 @@ def start_service(service_key):
     if skipped:
         parts.append('ya en marcha: ' + ', '.join(skipped))
     return True, 'Contenedores ' + '; '.join(parts) + '.'
+
+
+def container_logs(container, tail=200):
+    """Últimas líneas de stdout/stderr de un contenedor (para verlas desde el
+    panel). No usa _docker_request porque esa espera JSON y esto es un
+    stream de texto multiplexado."""
+    if not os.path.exists(DOCKER_SOCK):
+        return None, f'No se encuentra el socket de Docker ({DOCKER_SOCK}).'
+    conn = _DockerSocketConnection(DOCKER_SOCK)
+    conn.timeout = 20
+    try:
+        conn.request(
+            'GET', f'/containers/{container}/logs?stdout=1&stderr=1&timestamps=1&tail={int(tail)}'
+        )
+        response = conn.getresponse()
+        raw = response.read()
+        if response.status >= 400:
+            return None, raw.decode('utf-8', errors='replace')
+    except (TimeoutError, socket.timeout) as exc:
+        return None, f'Tiempo de espera agotado: {exc}'
+    except OSError as exc:
+        return None, f'Sin acceso a Docker: {exc}'
+    finally:
+        conn.close()
+
+    chunks = []
+    i = 0
+    while i + 8 <= len(raw):
+        length = struct.unpack('>I', raw[i + 4:i + 8])[0]
+        start = i + 8
+        end = start + length
+        chunks.append(raw[start:end])
+        i = end
+    text = b''.join(chunks).decode('utf-8', errors='replace') if chunks else raw.decode('utf-8', errors='replace')
+    return text, ''
+
+
+def list_all_containers():
+    """Lista cruda de todos los contenedores (nombre, estado, labels de
+    compose, puertos publicados), usado para detectar proyectos ya
+    corriendo que aún no están registrados en el panel."""
+    data, err = _docker_request('GET', '/containers/json?all=1')
+    if err or data is None:
+        return [], err
+    result = []
+    for item in data:
+        names = [n.lstrip('/') for n in (item.get('Names') or [])]
+        ports = item.get('Ports') or []
+        host_ports = sorted({p['PublicPort'] for p in ports if p.get('PublicPort')})
+        result.append({
+            'name': names[0] if names else '',
+            'names': names,
+            'state': (item.get('State') or '').lower(),
+            'labels': item.get('Labels') or {},
+            'host_ports': host_ports,
+        })
+    return result, ''
+
+
+def containers_status(containers):
+    """Estado simple {running, states} para una lista arbitraria de contenedores
+    (usado por proyectos registrados manualmente, fuera de MANAGED_SERVICES)."""
+    states, err = _container_states()
+    if err or states is None:
+        return {'running': False, 'state': 'desconocido', 'error': err}
+    found = [{'name': c, 'state': states.get(c, 'missing')} for c in containers]
+    if not found:
+        return {'running': False, 'state': 'sin contenedores', 'error': ''}
+    running_count = sum(1 for c in found if c['state'] == 'running')
+    if running_count == len(found):
+        state = 'running'
+    elif running_count > 0:
+        state = f'parcial ({running_count}/{len(found)})'
+    else:
+        first = found[0]['state']
+        state = first if first != 'missing' else 'stopped'
+    return {'running': running_count == len(found) and len(found) > 0, 'state': state, 'containers': found, 'error': ''}
+
+
+def stop_containers(containers):
+    states, err = _container_states()
+    if err:
+        return False, err
+    stopped = []
+    for container in containers:
+        if not _container_is_running(states, container):
+            continue
+        ok, err = _stop_container(container, states)
+        if not ok:
+            return False, err
+        stopped.append(container)
+    return True, ', '.join(stopped) if stopped else 'ya estaba detenido'
+
+
+def start_containers(containers):
+    states, err = _container_states()
+    if err:
+        return False, err
+    started = []
+    for container in containers:
+        if _container_is_running(states, container):
+            continue
+        ok, err = _start_container(container, states)
+        if not ok:
+            return False, err
+        started.append(container)
+    return True, ', '.join(started) if started else 'ya estaba en marcha'
 
 
 def container_to_project_map():

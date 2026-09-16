@@ -1,0 +1,26 @@
+{% extends "base_admin.html" %}
+{% block title %}Auditoría{% endblock %}
+{% block heading %}Auditoría{% endblock %}
+{% block content %}
+
+<p class="admin-hint">Últimas 200 acciones registradas por los administradores.</p>
+
+<div class="admin-table-wrap">
+	<table class="admin-table">
+		<thead><tr><th>Fecha</th><th>Admin</th><th>Acción</th><th>Detalle</th></tr></thead>
+		<tbody>
+			{% for e in entries %}
+			<tr>
+				<td>{{ e.ts[:19].replace('T', ' ') }}</td>
+				<td>{{ e.admin_email or '—' }}</td>
+				<td><code>{{ e.action }}</code></td>
+				<td>{{ e.detail or '' }}</td>
+			</tr>
+			{% else %}
+			<tr><td colspan="4" class="htop-loading">Sin actividad registrada todavía.</td></tr>
+			{% endfor %}
+		</tbody>
+	</table>
+</div>
+
+{% endblock %}

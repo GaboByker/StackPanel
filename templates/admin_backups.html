@@ -1,0 +1,64 @@
+{% extends "base_admin.html" %}
+{% block title %}Backups{% endblock %}
+{% block heading %}Backups{% endblock %}
+{% block content %}
+
+<p class="admin-hint">Cada proyecto tiene su propio horario de backup automático (días de la semana + hora), configurable desde su página de Detalles — no hay una hora compartida para todos.</p>
+
+<h2 class="landing-section-title">Backup automático por proyecto</h2>
+<div class="admin-table-wrap" style="margin-bottom:28px;">
+	<table class="admin-table">
+		<thead><tr><th>Proyecto</th><th>Activo</th><th>Días</th><th>Hora</th><th>Retención</th><th></th></tr></thead>
+		<tbody>
+			{% for p in projects %}
+			<tr>
+				<td>{{ p.name }}</td>
+				<td>
+					<form method="post" action="/admin/projects/{{ p.id }}/auto-backup-quick-toggle">
+						<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+						<label class="switch">
+							<input type="checkbox" onchange="this.form.submit()" {{ 'checked' if p.auto_backup else '' }}/>
+							<span class="switch-track"><span class="switch-thumb"></span></span>
+						</label>
+					</form>
+				</td>
+				<td>{{ p.backup_days or '—' }}</td>
+				<td>{{ '%02d:00'|format(p.backup_hour) if p.auto_backup else '—' }}</td>
+				<td>{{ p.backup_retention or 7 }}</td>
+				<td><a class="btn btn-secondary btn-sm" href="/admin/projects/{{ p.id }}">Configurar</a></td>
+			</tr>
+			{% else %}
+			<tr><td colspan="6" class="htop-loading">No hay proyectos con contenedores vinculados todavía.</td></tr>
+			{% endfor %}
+		</tbody>
+	</table>
+</div>
+
+<h2 class="landing-section-title">Backups guardados</h2>
+{% if files %}
+<div class="admin-table-wrap">
+	<table class="admin-table">
+		<thead><tr><th>Archivo</th><th>Tamaño</th><th>Fecha</th><th></th></tr></thead>
+		<tbody>
+			{% for f in files %}
+			<tr>
+				<td>{{ f.name }}</td>
+				<td>{{ f.size|filesizeformat }}</td>
+				<td>{{ f.mtime.strftime('%Y-%m-%d %H:%M') }}</td>
+				<td style="white-space:nowrap;">
+					<a class="btn btn-secondary btn-sm" href="/admin/backups/{{ f.name }}/download">Descargar</a>
+					<form method="post" action="/admin/backups/{{ f.name }}/delete" style="display:inline;" onsubmit="return confirm('¿Eliminar {{ f.name }}?');">
+						<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+						<button type="submit" class="btn btn-danger btn-sm">Eliminar</button>
+					</form>
+				</td>
+			</tr>
+			{% endfor %}
+		</tbody>
+	</table>
+</div>
+{% else %}
+<p class="empty-state">Aún no hay backups guardados. Usa el botón "Backup" de un proyecto, o configura su horario automático arriba.</p>
+{% endif %}
+
+{% endblock %}

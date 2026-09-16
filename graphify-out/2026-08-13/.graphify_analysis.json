@@ -1,0 +1,320 @@
+{
+  "communities": {
+    "0": [
+      "docker_control",
+      "docker_control_container_is_running",
+      "docker_control_container_running",
+      "docker_control_container_states",
+      "docker_control_container_to_project_map",
+      "docker_control_docker_request",
+      "docker_control_dockersocketconnection",
+      "docker_control_dockersocketconnection_connect",
+      "docker_control_dockersocketconnection_init",
+      "docker_control_health_check",
+      "docker_control_is_already_stopped_error",
+      "docker_control_list_service_status",
+      "docker_control_rationale_141",
+      "docker_control_rationale_177",
+      "docker_control_rationale_210",
+      "docker_control_rationale_365",
+      "docker_control_resolve_service_containers",
+      "docker_control_start_container",
+      "docker_control_start_service",
+      "docker_control_stop_container",
+      "docker_control_stop_service"
+    ],
+    "1": [
+      "auth_logout_admin",
+      "portal_server",
+      "portal_server_admin_graphify_file",
+      "portal_server_admin_graphify_index",
+      "portal_server_admin_graphify_project",
+      "portal_server_admin_logout",
+      "portal_server_admin_panel",
+      "portal_server_clear_session_cookie",
+      "portal_server_graphify_out_dir",
+      "portal_server_list_graphify_graphs",
+      "portal_server_load_projects",
+      "portal_server_no_cache",
+      "portal_server_portal_home",
+      "portal_server_require_admin"
+    ],
+    "2": [
+      "templates_admin_panel_container_start",
+      "templates_admin_panel_container_stop",
+      "templates_admin_panel_cpu_mem",
+      "templates_admin_panel_docker_projects",
+      "templates_admin_panel_htop",
+      "templates_admin_panel_instance_persist",
+      "templates_admin_panel_metrics_api",
+      "templates_admin_panel_monitor",
+      "templates_admin_panel_poll_2s",
+      "templates_admin_panel_public_host",
+      "templates_admin_panel_services",
+      "templates_portal_docker",
+      "templates_portal_independent_apps",
+      "templates_portal_public_host"
+    ],
+    "3": [
+      "requirements_flask",
+      "templates_admin_login_no_registro",
+      "templates_admin_new_admin_only",
+      "templates_admin_new_crear_admin",
+      "templates_admin_new_page",
+      "templates_admin_new_panel_link",
+      "templates_admin_panel_admins_list",
+      "templates_admin_panel_admins_new_route",
+      "templates_admin_panel_no_autoregistro",
+      "templates_admin_panel_page"
+    ],
+    "4": [
+      "requirements_waitress",
+      "templates_admin_graphify_portal_route",
+      "templates_admin_login_administracion",
+      "templates_admin_login_page",
+      "templates_admin_login_portal_link",
+      "templates_portal_admin_login_route",
+      "templates_portal_admin_panel_route",
+      "templates_portal_brand",
+      "templates_portal_page",
+      "templates_portal_port_5005"
+    ],
+    "5": [
+      "auth",
+      "auth_admin_required",
+      "auth_authenticate",
+      "auth_connect",
+      "auth_create_admin",
+      "auth_db_path",
+      "auth_init_db",
+      "auth_list_admins",
+      "auth_normalize_email"
+    ],
+    "6": [
+      "auth_get_admin",
+      "auth_get_admin_id",
+      "context_processor",
+      "portal_server_admin_create_admin",
+      "portal_server_admin_metrics_api",
+      "portal_server_admin_start_container",
+      "portal_server_admin_stop_container",
+      "portal_server_inject_admin",
+      "route"
+    ],
+    "7": [
+      "system_monitor",
+      "system_monitor_calc_cpu_percent",
+      "system_monitor_container_stats",
+      "system_monitor_fetch_container_stats_batch",
+      "system_monitor_format_bytes",
+      "system_monitor_get_system_metrics",
+      "system_monitor_host_info",
+      "system_monitor_rationale_1",
+      "system_monitor_rationale_69"
+    ],
+    "8": [
+      "templates_admin_graphify_admin_route",
+      "templates_admin_graphify_grafos_codigo",
+      "templates_admin_graphify_page",
+      "templates_admin_graphify_portal_css",
+      "templates_admin_graphify_private_viz",
+      "templates_admin_panel_admin_graphify_route",
+      "templates_portal_css",
+      "templates_portal_graphify_route"
+    ],
+    "9": [
+      "templates_admin_graphify_graphify_out",
+      "templates_admin_graphify_graphify_update",
+      "templates_admin_graphify_graphs",
+      "templates_admin_panel_graphify_graphs",
+      "templates_admin_panel_graphify_out_html",
+      "templates_admin_panel_graphify_section",
+      "templates_portal_projects",
+      "templates_portal_projects_json"
+    ],
+    "10": [
+      "templates_admin_login_email",
+      "templates_admin_login_form",
+      "templates_admin_login_password",
+      "templates_admin_new_form",
+      "templates_admin_new_password_min8"
+    ],
+    "11": [
+      "templates_admin_graphify_logout",
+      "templates_admin_new_logout",
+      "templates_admin_panel_logout",
+      "templates_portal_logout"
+    ],
+    "12": [
+      "templates_admin_graphify_current_admin",
+      "templates_admin_panel_current_admin",
+      "templates_portal_current_admin"
+    ],
+    "13": [
+      "auth_login_admin",
+      "portal_server_admin_login"
+    ]
+  },
+  "cohesion": {
+    "0": 0.20952380952380953,
+    "1": 0.3076923076923077,
+    "2": 0.16483516483516483,
+    "3": 0.3111111111111111,
+    "4": 0.2222222222222222,
+    "5": 0.4166666666666667,
+    "6": 0.3333333333333333,
+    "7": 0.4166666666666667,
+    "8": 0.2857142857142857,
+    "9": 0.2857142857142857,
+    "10": 0.4,
+    "11": 0.5,
+    "12": 0.6666666666666666,
+    "13": 1.0
+  },
+  "gods": [
+    {
+      "id": "templates_portal_page",
+      "label": "Portal — Proyectos",
+      "degree": 15
+    },
+    {
+      "id": "templates_admin_panel_page",
+      "label": "Panel admin — Portal",
+      "degree": 14
+    },
+    {
+      "id": "templates_admin_graphify_page",
+      "label": "Grafos Graphify — Admin",
+      "degree": 11
+    },
+    {
+      "id": "auth_get_admin_id",
+      "label": "get_admin_id()",
+      "degree": 10
+    },
+    {
+      "id": "docker_control_docker_request",
+      "label": "_docker_request()",
+      "degree": 9
+    },
+    {
+      "id": "docker_control_container_states",
+      "label": "_container_states()",
+      "degree": 9
+    },
+    {
+      "id": "docker_control_resolve_service_containers",
+      "label": "_resolve_service_containers()",
+      "degree": 9
+    },
+    {
+      "id": "system_monitor_get_system_metrics",
+      "label": "get_system_metrics()",
+      "degree": 8
+    },
+    {
+      "id": "auth_connect",
+      "label": "_connect()",
+      "degree": 7
+    },
+    {
+      "id": "docker_control_stop_container",
+      "label": "_stop_container()",
+      "degree": 7
+    }
+  ],
+  "surprises": [
+    {
+      "source": "get_system_metrics()",
+      "target": "_container_states()",
+      "source_files": [
+        "system_monitor.py",
+        "docker_control.py"
+      ],
+      "confidence": "INFERRED",
+      "relation": "indirect_call",
+      "why": "inferred connection - not explicitly stated in source; connects across different repos/directories; bridges separate communities"
+    },
+    {
+      "source": "Flask",
+      "target": "Grafos Graphify — Admin",
+      "source_files": [
+        "requirements.txt",
+        "templates/admin_graphify.html"
+      ],
+      "confidence": "INFERRED",
+      "relation": "conceptually_related_to",
+      "why": "inferred connection - not explicitly stated in source; connects across different repos/directories; bridges separate communities"
+    },
+    {
+      "source": "Flask",
+      "target": "Admin — Portal (login)",
+      "source_files": [
+        "requirements.txt",
+        "templates/admin_login.html"
+      ],
+      "confidence": "INFERRED",
+      "relation": "conceptually_related_to",
+      "why": "inferred connection - not explicitly stated in source; connects across different repos/directories; bridges separate communities"
+    },
+    {
+      "source": "Flask",
+      "target": "Portal — Proyectos",
+      "source_files": [
+        "requirements.txt",
+        "templates/portal.html"
+      ],
+      "confidence": "INFERRED",
+      "relation": "conceptually_related_to",
+      "why": "inferred connection - not explicitly stated in source; connects across different repos/directories; bridges separate communities"
+    },
+    {
+      "source": "admin_login()",
+      "target": "get_admin_id()",
+      "source_files": [
+        "portal-server.py",
+        "auth.py"
+      ],
+      "confidence": "EXTRACTED",
+      "relation": "calls",
+      "why": "connects across different repos/directories; bridges separate communities"
+    }
+  ],
+  "questions": [
+    {
+      "type": "bridge_node",
+      "question": "Why does `Panel admin — Portal` connect `Community 3` to `Community 2`, `Community 4`, `Community 8`, `Community 9`, `Community 10`, `Community 11`, `Community 12`?",
+      "why": "High betweenness centrality (0.089) - this node is a cross-community bridge."
+    },
+    {
+      "type": "bridge_node",
+      "question": "Why does `Portal — Proyectos` connect `Community 4` to `Community 2`, `Community 3`, `Community 8`, `Community 9`, `Community 11`, `Community 12`?",
+      "why": "High betweenness centrality (0.068) - this node is a cross-community bridge."
+    },
+    {
+      "type": "bridge_node",
+      "question": "Why does `Flask` connect `Community 3` to `Community 8`, `Community 4`?",
+      "why": "High betweenness centrality (0.043) - this node is a cross-community bridge."
+    },
+    {
+      "type": "verify_inferred",
+      "question": "Are the 3 inferred relationships involving `Portal — Proyectos` (e.g. with `Flask` and `/ (Portal)`) actually correct?",
+      "why": "`Portal — Proyectos` has 3 INFERRED edges - model-reasoned connections that need verification."
+    },
+    {
+      "type": "verify_inferred",
+      "question": "Are the 5 inferred relationships involving `Panel admin — Portal` (e.g. with `Flask` and `/admin`) actually correct?",
+      "why": "`Panel admin — Portal` has 5 INFERRED edges - model-reasoned connections that need verification."
+    },
+    {
+      "type": "verify_inferred",
+      "question": "Are the 3 inferred relationships involving `Grafos Graphify — Admin` (e.g. with `Flask` and `/admin/graphify`) actually correct?",
+      "why": "`Grafos Graphify — Admin` has 3 INFERRED edges - model-reasoned connections that need verification."
+    },
+    {
+      "type": "isolated_nodes",
+      "question": "What connects `graphify update`, `Administración del portal`, `Campo contraseña (login)` to the rest of the system?",
+      "why": "9 weakly-connected nodes found - possible documentation gaps or missing edges."
+    }
+  ]
+}
