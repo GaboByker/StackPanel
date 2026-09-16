@@ -21,13 +21,22 @@ Flask + Waitress, SQLite, Docker Engine API (socket directo), Nginx.
 
 ## Instalación rápida
 
-Requisitos: [Docker](https://docs.docker.com/engine/install/) con el plugin `docker compose` (v2).
+### Requisitos
+
+- **Docker** con el plugin `docker compose` (v2). Si no lo tenés, el instalador te lo dice y corta — instalalo primero:
+  ```bash
+  sudo apt update && sudo apt install -y docker.io docker-compose-v2
+  sudo usermod -aG docker "$USER"   # cerrá sesión y volvé a entrar después
+  ```
+  (en otras distros: `curl -fsSL https://get.docker.com | sh`)
+- **Puertos 80 y 443 libres.** Los usa el proxy nginx/SSL del panel (certificados Let's Encrypt incluidos) — no son configurables. Si ya tenés algo corriendo ahí (otro nginx, Apache, Caddy, etc.), liberalos o el instalador va a saltear el proxy automáticamente y solo levantar el panel.
+- El puerto del panel en sí (**5005** por defecto) **sí es flexible**: si está ocupado, el instalador elige automáticamente el próximo puerto libre.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/GaboByker/StackPanel/main/install.sh | bash
 ```
 
-Esto descarga el código (sin necesitar `git`), crea las carpetas de datos (`html/`, `backups/`, `proxy/sites/`, `instance/`), genera un `.env` con una clave nueva y levanta los contenedores. Al terminar te muestra la URL para abrir el panel — la primera vez te lleva directo al asistente de configuración (`/setup`) para crear el usuario administrador.
+Esto descarga el código (sin necesitar `git`), crea las carpetas de datos (`html/`, `backups/`, `proxy/sites/`, `instance/`), genera un `.env` con una clave nueva, elige un puerto libre para el panel y levanta los contenedores. Al terminar te muestra la URL para abrir el panel — la primera vez te lleva directo al asistente de configuración (`/setup`) para crear el usuario administrador.
 
 Variables opcionales antes de instalar:
 

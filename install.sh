@@ -6,8 +6,9 @@
 #   curl -fsSL https://raw.githubusercontent.com/GaboByker/StackPanel/main/install.sh | bash
 #
 # Variables opcionales:
-#   STACKPANEL_DIR    directorio de instalación (default: ~/stackpanel)
+#   STACKPANEL_DIR     directorio de instalación (default: ~/stackpanel)
 #   STACKPANEL_BRANCH  rama a instalar (default: main)
+#   PORTAL_PORT         puerto del panel si no querés que se elija solo
 set -euo pipefail
 
 REPO="GaboByker/StackPanel"
@@ -16,14 +17,30 @@ INSTALL_DIR="${STACKPANEL_DIR:-$HOME/stackpanel}"
 
 echo "==> Instalando StackPanel en ${INSTALL_DIR}"
 
-command -v docker >/dev/null 2>&1 || {
-    echo "Docker no está instalado. Instalalo primero: https://docs.docker.com/engine/install/" >&2
-    exit 1
+port_in_use() {
+    (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null && { exec 3>&-; return 0; } || return 1
 }
-docker compose version >/dev/null 2>&1 || {
-    echo "Necesitás el plugin 'docker compose' (v2). https://docs.docker.com/compose/install/" >&2
+
+if ! command -v docker >/dev/null 2>&1; then
+    cat >&2 <<'MSG'
+Docker no está instalado. Instalalo primero y volvé a correr este script.
+
+  Debian/Ubuntu:
+    sudo apt update && sudo apt install -y docker.io docker-compose-v2
+    sudo usermod -aG docker "$USER"
+    # cerrá sesión y volvé a entrar (o ejecutá: newgrp docker)
+
+  Cualquier otra distro / instalador oficial:
+    curl -fsSL https://get.docker.com | sh
+
+Más info: https://docs.docker.com/engine/install/
+MSG
     exit 1
-}
+fi
+if ! docker compose version >/dev/null 2>&1; then
+    echo "Necesitás el plugin 'docker compose' (v2): https://docs.docker.com/compose/install/" >&2
+    exit 1
+fi
 
 TMP_DIR=$(mktemp -d)
 trap 'rm -rf "${TMP_DIR}"' EXIT
@@ -55,12 +72,44 @@ else
     echo "==> Ya existe un .env, lo dejo como está."
 fi
 
+# Puerto del panel: si el que hay en .env (o el default 5005) está ocupado,
+# busca el próximo libre y lo deja anotado. 80/443 (nginx del proxy) NO se
+# reasignan solos: certificados SSL y muchos servicios esperan esos puertos
+# fijos, así que si están ocupados avisamos y salteamos el proxy.
+CONFIGURED_PORT=$(grep '^PORTAL_PORT=' .env | cut -d= -f2-)
+PORT="${PORTAL_PORT:-${CONFIGURED_PORT:-5005}}"
+if port_in_use "${PORT}"; then
+    ORIGINAL_PORT="${PORT}"
+    while port_in_use "${PORT}"; do
+        PORT=$((PORT + 1))
+    done
+    echo "==> El puerto ${ORIGINAL_PORT} está ocupado, uso el ${PORT} en su lugar."
+fi
+sed -i.bak "s#^PORTAL_PORT=.*#PORTAL_PORT=${PORT}#" .env
+rm -f .env.bak
+
+SKIP_PROXY=0
+BUSY_PORTS=""
+for p in 80 443; do
+    if port_in_use "${p}"; then
+        BUSY_PORTS="${BUSY_PORTS} ${p}"
+        SKIP_PROXY=1
+    fi
+done
+if [ "${SKIP_PROXY}" = "1" ]; then
+    echo "==> Puerto(s)${BUSY_PORTS} ocupados: salteo el proxy/SSL (nginx + certbot)."
+    echo "    El panel arranca igual. Cuando liberes esos puertos, corré:"
+    echo "        docker compose up -d --build proxy proxy-certbot"
+fi
+
 echo "==> Levantando contenedores (esto puede tardar un par de minutos la primera vez)..."
-docker compose up -d --build
+if [ "${SKIP_PROXY}" = "1" ]; then
+    docker compose up -d --build portal
+else
+    docker compose up -d --build
+fi
 
 PUBLIC_HOST=$(grep '^PUBLIC_HOST=' .env | cut -d= -f2-)
-PORTAL_PORT=$(grep '^PORTAL_PORT=' .env | cut -d= -f2-)
-PORTAL_PORT="${PORTAL_PORT:-5005}"
 
 cat <<MSG
 
@@ -68,7 +117,7 @@ cat <<MSG
 
 Abrí en tu navegador:
 
-    http://${PUBLIC_HOST}:${PORTAL_PORT}/setup
+    http://${PUBLIC_HOST}:${PORT}/setup
 
 La primera vez te va a pedir crear el usuario administrador.
 
