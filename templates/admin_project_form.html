@@ -40,8 +40,11 @@
 	<div id="port-fields">
 		<div class="field">
 			<label for="port">Puerto</label>
-			<input type="number" id="port" name="port" min="1" max="65535" placeholder="5050"/>
+			<input type="number" id="port" name="port" min="1" max="65535" placeholder="5050" list="docker-ports-list" autocomplete="off"/>
+			<datalist id="docker-ports-list"></datalist>
 			<p class="field-hint">El portal enlazará a http://{{ public_host if public_host else 'IP' }}:puerto</p>
+			<p class="field-hint">Debe ser el puerto donde el contenedor responde por <strong>HTTP</strong> (el que abrirías en el navegador), no un puerto interno como el de una base de datos.</p>
+			<div id="docker-ports-hint" class="field-hint"></div>
 		</div>
 	</div>
 
@@ -95,6 +98,57 @@
 	portRadio.addEventListener('change', sync);
 	domainRadio.addEventListener('change', sync);
 	sync();
+
+	const portInput = document.getElementById('port');
+	const portsList = document.getElementById('docker-ports-list');
+	const portsHint = document.getElementById('docker-ports-hint');
+	let dockerPorts = [];
+
+	fetch('/admin/api/docker-ports', { credentials: 'same-origin' })
+		.then(function (res) { return res.json(); })
+		.then(function (data) {
+			dockerPorts = data.ports || [];
+			if (!dockerPorts.length) {
+				portsHint.textContent = data.error
+					? 'No se pudo consultar Docker: ' + data.error
+					: 'No se detectaron puertos publicados por contenedores en marcha.';
+				return;
+			}
+			portsList.innerHTML = dockerPorts.map(function (p) {
+				let label = p.container;
+				if (p.http_ok) { label += ' — responde HTTP'; }
+				if (p.registered) { label += ' (ya usado por otro proyecto)'; }
+				return '<option value="' + p.port + '">' + label + '</option>';
+			}).join('');
+			portsHint.textContent = 'Puertos detectados en Docker: ' + dockerPorts.map(function (p) {
+				return p.port + ' (' + p.container + (p.http_ok ? ', responde HTTP' : ', no responde HTTP') + ')';
+			}).join(', ');
+			// Si el puerto está vacío, sugerimos el primero que sí responde HTTP.
+			if (!portInput.value) {
+				const httpPort = dockerPorts.find(function (p) { return p.http_ok && !p.registered; });
+				if (httpPort) { portInput.value = httpPort.port; }
+			}
+			updateMatch();
+		})
+		.catch(function () {
+			portsHint.textContent = 'No se pudo consultar los puertos de Docker.';
+		});
+
+	function updateMatch() {
+		const value = parseInt(portInput.value, 10);
+		if (!value) { return; }
+		const match = dockerPorts.find(function (p) { return p.port === value; });
+		if (!match) {
+			portsHint.textContent = 'Ese puerto no aparece publicado por ningún contenedor en marcha; revisa con "docker ps" que sea el correcto antes de guardar.';
+		} else if (match.registered) {
+			portsHint.textContent = 'Puerto ' + value + ' (' + match.container + ') ya está usado por otro proyecto del panel.';
+		} else if (!match.http_ok) {
+			portsHint.textContent = 'Aviso: el puerto ' + value + ' (' + match.container + ') está publicado pero no respondió HTTP — puede ser un puerto interno (ej. base de datos) y no el de la app.';
+		} else {
+			portsHint.textContent = 'Puerto ' + value + ' detectado en "' + match.container + '" y responde HTTP.';
+		}
+	}
+	portInput.addEventListener('input', updateMatch);
 })();
 </script>
 {% endblock %}

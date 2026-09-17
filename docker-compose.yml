@@ -14,6 +14,7 @@ services:
       DOCKER_SOCK: /var/run/docker.sock
       HOST_STACK_ROOT: ${STACK_ROOT:?definí STACK_ROOT en .env}
       PORTAL_MAX_UPLOAD_MB: ${PORTAL_MAX_UPLOAD_MB:-512}
+      SFTP_PORT: ${SFTP_PORT:-2222}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${STACK_ROOT:?definí STACK_ROOT en .env}:/stack:ro

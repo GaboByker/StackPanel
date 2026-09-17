@@ -1,3 +1,4 @@
+{% from '_icons.html' import icon_dashboard, icon_stack, icon_folder, icon_globe, icon_shield, icon_archive, icon_cpu, icon_bell, icon_share, icon_users, icon_arrow_up_right %}
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -6,6 +7,9 @@
 	<title>{% block title %}Panel{% endblock %} · Administración</title>
 	<meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate"/>
 	<meta http-equiv="Pragma" content="no-cache"/>
+	<link rel="preconnect" href="https://fonts.googleapis.com"/>
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+	<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"/>
 	<link rel="stylesheet" href="/static/css/portal.css"/>
 	<script>
 		(function () {
@@ -29,16 +33,16 @@
 				</button>
 			</div>
 			<nav class="admin-nav" aria-label="Navegación de administración">
-				<a href="/admin" class="{{ 'active' if request.path == '/admin' else '' }}">Resumen</a>
-				<a href="/admin/projects" class="{{ 'active' if request.path.startswith('/admin/projects') else '' }}">Proyectos</a>
-				<a href="/admin/files/" class="{{ 'active' if request.path.startswith('/admin/files') else '' }}">Archivos</a>
-				<a href="/admin/proxy" class="{{ 'active' if request.path.startswith('/admin/proxy') else '' }}">Proxy &amp; SSL</a>
-				<a href="/admin/firewall" class="{{ 'active' if request.path.startswith('/admin/firewall') else '' }}">Firewall</a>
-				<a href="/admin/backups" class="{{ 'active' if request.path.startswith('/admin/backups') else '' }}">Backups</a>
-				<a href="/admin/resources" class="{{ 'active' if request.path.startswith('/admin/resources') else '' }}">Recursos</a>
-				<a href="/admin/notifications" class="{{ 'active' if request.path.startswith('/admin/notifications') else '' }}">Notificaciones</a>
-				<a href="/admin/graphify" class="{{ 'active' if request.path.startswith('/admin/graphify') else '' }}">Grafos</a>
-				<a href="/admin/admins" class="{{ 'active' if request.path.startswith('/admin/admins') else '' }}">Administradores</a>
+				<a href="/admin" class="{{ 'active' if request.path == '/admin' else '' }}">{{ icon_dashboard() }}<span>Resumen</span></a>
+				<a href="/admin/projects" class="{{ 'active' if request.path.startswith('/admin/projects') else '' }}">{{ icon_stack() }}<span>Proyectos</span></a>
+				<a href="/admin/files/" class="{{ 'active' if request.path.startswith('/admin/files') else '' }}">{{ icon_folder() }}<span>Archivos</span></a>
+				<a href="/admin/proxy" class="{{ 'active' if request.path.startswith('/admin/proxy') else '' }}">{{ icon_globe() }}<span>Proxy &amp; SSL</span></a>
+				<a href="/admin/firewall" class="{{ 'active' if request.path.startswith('/admin/firewall') else '' }}">{{ icon_shield() }}<span>Firewall</span></a>
+				<a href="/admin/backups" class="{{ 'active' if request.path.startswith('/admin/backups') else '' }}">{{ icon_archive() }}<span>Backups</span></a>
+				<a href="/admin/resources" class="{{ 'active' if request.path.startswith('/admin/resources') else '' }}">{{ icon_cpu() }}<span>Recursos</span></a>
+				<a href="/admin/notifications" class="{{ 'active' if request.path.startswith('/admin/notifications') else '' }}">{{ icon_bell() }}<span>Notificaciones</span></a>
+				<a href="/admin/graphify" class="{{ 'active' if request.path.startswith('/admin/graphify') else '' }}">{{ icon_share() }}<span>Grafos</span></a>
+				<a href="/admin/admins" class="{{ 'active' if request.path.startswith('/admin/admins') else '' }}">{{ icon_users() }}<span>Administradores</span></a>
 			</nav>
 			<div class="admin-sidebar-footer">
 				<label class="theme-switch" for="theme-toggle-input">
@@ -48,7 +52,7 @@
 						<span class="switch-track"><span class="switch-thumb"></span></span>
 					</span>
 				</label>
-				<a href="/" target="_blank" rel="noopener" class="admin-sidebar-link">Ver portal ↗</a>
+				<a href="/" target="_blank" rel="noopener" class="admin-sidebar-link">{{ icon_arrow_up_right(cls='icon icon-sm') }} Ver portal</a>
 				<div class="admin-user" title="{{ current_admin.email }}">{{ current_admin.email }}</div>
 				<form method="post" action="/admin/logout" class="logout-form">
 					<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>

@@ -1,16 +1,18 @@
 {% extends "base_admin.html" %}
+{% from '_icons.html' import icon_grid, icon_list, icon_bolt, icon_code, icon_database, icon_archive, icon_signal, icon_cog, icon_arrow_up_right %}
 {% block title %}Proyectos{% endblock %}
 {% block heading %}Proyectos{% endblock %}
 {% block topbar_actions %}
 <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
 	<div class="view-switch" role="group" aria-label="Vista">
-		<button type="button" class="view-switch-btn" data-view="cards" title="Tarjetas">▦</button>
-		<button type="button" class="view-switch-btn" data-view="list" title="Lista">☰</button>
+		<button type="button" class="view-switch-btn" data-view="cards" title="Tarjetas">{{ icon_grid(cls='icon icon-sm') }}</button>
+		<button type="button" class="view-switch-btn" data-view="list" title="Lista">{{ icon_list(cls='icon icon-sm') }}</button>
 	</div>
 	<div class="admin-actions" style="margin:0;">
 		<a class="btn btn-secondary btn-sm" href="/admin/projects/scan">Escanear html/</a>
 		<a class="btn btn-secondary btn-sm" href="/admin/projects/restore">Restaurar backup</a>
-		<a class="btn btn-secondary btn-sm" href="/admin/projects/install">⚡ Instalar app</a>
+		<a class="btn btn-secondary btn-sm" href="/admin/projects/install">{{ icon_bolt(cls='icon icon-sm') }} Instalar app</a>
+		<a class="btn btn-secondary btn-sm" href="/admin/projects/from-git">{{ icon_code(cls='icon icon-sm') }} Desde Git</a>
 		<a class="btn btn-primary btn-sm" href="/admin/projects/new">+ Nuevo proyecto</a>
 	</div>
 </div>
@@ -20,11 +22,90 @@
 <p class="admin-hint">Estas son las tarjetas que ven los visitantes en el portal público. Para backups, base de datos, variables de entorno, límites y más, entra a "Detalles".</p>
 
 {% if projects %}
+<div class="stats-grid">
+	<div class="stat-tile">
+		<div class="stat-tile-value">{{ stats.total }}</div>
+		<div class="stat-tile-label">Proyectos</div>
+	</div>
+	<div class="stat-tile accent-success">
+		<div class="stat-tile-value">{{ stats.running }}</div>
+		<div class="stat-tile-label">En marcha</div>
+	</div>
+	<div class="stat-tile accent-danger">
+		<div class="stat-tile-value">{{ stats.stopped }}</div>
+		<div class="stat-tile-label">Detenidos</div>
+	</div>
+	<div class="stat-tile accent-accent">
+		<div class="stat-tile-value">{{ stats.with_db }}</div>
+		<div class="stat-tile-label">Con base de datos</div>
+	</div>
+</div>
+
+<div class="stats-panels">
+	<div class="donut-card">
+		<div class="donut-wrap">
+			<svg class="donut-svg" viewBox="0 0 42 42" role="img" aria-label="Distribución de estado de los proyectos">
+				<circle cx="21" cy="21" r="15.91549430918954" fill="transparent" stroke="var(--surface-2)" stroke-width="5"></circle>
+				{% for seg in stats.donut_segments %}
+				{% if seg.value %}
+				<circle cx="21" cy="21" r="15.91549430918954" fill="transparent" stroke="{{ seg.color }}" stroke-width="5"
+					stroke-dasharray="{{ seg.dasharray }}" stroke-dashoffset="{{ seg.dashoffset }}">
+					<title>{{ seg.label }}: {{ seg.value }} ({{ seg.pct }}%)</title>
+				</circle>
+				{% endif %}
+				{% endfor %}
+			</svg>
+			<div class="donut-center">
+				<span class="donut-center-value">{{ stats.total }}</span>
+				<span class="donut-center-label">proyectos</span>
+			</div>
+		</div>
+		<div class="donut-legend">
+			{% for seg in stats.donut_segments %}
+			<div class="donut-legend-row">
+				<span class="donut-legend-dot" style="background:{{ seg.color }};"></span>
+				<span class="donut-legend-label">{{ seg.label }}</span>
+				<span class="donut-legend-value">{{ seg.value }} · {{ seg.pct }}%</span>
+			</div>
+			{% endfor %}
+		</div>
+	</div>
+	<div class="mini-stats-card">
+		<div class="mini-stats-row">
+			<span class="mini-stats-row-label">Backup automático</span>
+			<span class="mini-stats-bar-track"><span class="mini-stats-bar-fill" style="width:{{ (stats.auto_backup / stats.total * 100) if stats.total else 0 }}%;"></span></span>
+			<span class="mini-stats-row-value">{{ stats.auto_backup }} / {{ stats.total }}</span>
+		</div>
+		<div class="mini-stats-row">
+			<span class="mini-stats-row-label">Monitoreo de caídas</span>
+			<span class="mini-stats-bar-track"><span class="mini-stats-bar-fill" style="width:{{ (stats.monitored / stats.total * 100) if stats.total else 0 }}%;"></span></span>
+			<span class="mini-stats-row-value">{{ stats.monitored }} / {{ stats.total }}</span>
+		</div>
+		<div class="mini-stats-row">
+			<span class="mini-stats-row-label">Con base de datos</span>
+			<span class="mini-stats-bar-track"><span class="mini-stats-bar-fill" style="width:{{ (stats.with_db / stats.total * 100) if stats.total else 0 }}%;"></span></span>
+			<span class="mini-stats-row-value">{{ stats.with_db }} / {{ stats.total }}</span>
+		</div>
+		<div class="mini-stats-row">
+			<span class="mini-stats-row-label">Sin contenedor propio</span>
+			<span class="mini-stats-bar-track"><span class="mini-stats-bar-fill" style="width:{{ (stats.custom / stats.total * 100) if stats.total else 0 }}%;"></span></span>
+			<span class="mini-stats-row-value">{{ stats.custom }} / {{ stats.total }}</span>
+		</div>
+	</div>
+</div>
+{% endif %}
+
+{% if projects %}
 <div class="admin-services" id="projects-cards">
 	{% for p in projects %}
 	<article class="admin-service-card">
 		<div class="admin-service-head">
-			<h3><a href="/admin/projects/{{ p.db_id }}" style="color:inherit; text-decoration:none;">{{ p.name }}</a></h3>
+			<div class="admin-service-title-row">
+				<span class="admin-service-avatar">
+					{% if p.icon %}<img src="{{ p.icon }}" alt=""/>{% else %}{{ p.name[:1]|upper }}{% endif %}
+				</span>
+				<h3><a href="/admin/projects/{{ p.db_id }}" style="color:inherit; text-decoration:none;">{{ p.name }}</a></h3>
+			</div>
 			{% if p.docker_status %}
 			<span class="status-pill {{ 'running' if p.docker_status.running else 'stopped' }}">
 				{{ 'En marcha' if p.docker_status.running else p.docker_status.state }}
@@ -33,11 +114,17 @@
 			<span class="status-pill custom">{{ 'Dominio propio' if p.access_mode == 'domain' else 'Por puerto' }}</span>
 			{% endif %}
 		</div>
-		<p>{{ p.description or '—' }}</p>
+		<p class="admin-service-desc">{{ p.description or '—' }}</p>
 		<p><strong>URL:</strong> <code>{{ p.url }}</code></p>
-		{% if p.db_count %}<p><span class="status-pill running">🗄 {{ p.db_count }} BD conectada{{ 's' if p.db_count > 1 else '' }}</span></p>{% endif %}
+		<div class="admin-service-meta">
+			{% if p.db_count %}<span class="admin-service-chip">{{ icon_database() }} {{ p.db_count }} BD</span>{% endif %}
+			{% if p.template %}<span class="admin-service-chip">{{ p.template }}</span>{% endif %}
+			{% if p.auto_backup %}<span class="admin-service-chip">{{ icon_archive() }} backup auto</span>{% endif %}
+			{% if p.monitor_health %}<span class="admin-service-chip">{{ icon_signal() }} monitoreado</span>{% endif %}
+			{% if p.cpu_limit or p.mem_limit_mb %}<span class="admin-service-chip">{{ icon_cog() }} límites</span>{% endif %}
+		</div>
 		<div class="admin-actions">
-			<a class="btn btn-secondary btn-sm" href="{{ p.url }}" target="_blank" rel="noopener">Abrir ↗</a>
+			<a class="btn btn-secondary btn-sm" href="{{ p.url }}" target="_blank" rel="noopener">{{ icon_arrow_up_right(cls='icon icon-sm') }} Abrir</a>
 			{% if p.containers %}
 				{% if p.docker_status and p.docker_status.running %}
 				<form method="post" action="/admin/projects/{{ p.db_id }}/stop" style="display:inline;" onsubmit="return confirm('¿Detener {{ p.name }}?');">
@@ -72,7 +159,7 @@
 					{% endif %}
 				</td>
 				<td><code>{{ p.url }}</code></td>
-				<td>{{ '🗄 ' ~ p.db_count if p.db_count else '—' }}</td>
+				<td>{{ p.db_count if p.db_count else '—' }}</td>
 				<td style="white-space:nowrap;">
 					<a class="btn btn-secondary btn-sm" href="{{ p.url }}" target="_blank" rel="noopener">Abrir</a>
 					<a class="btn btn-secondary btn-sm" href="/admin/projects/{{ p.db_id }}">Detalles</a>

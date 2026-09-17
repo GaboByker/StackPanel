@@ -1,3 +1,4 @@
+{% from '_icons.html' import icon_chevron_left %}
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -6,6 +7,9 @@
 	<title>Iniciar sesión — Panel</title>
 	<meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate"/>
 	<meta http-equiv="Pragma" content="no-cache"/>
+	<link rel="preconnect" href="https://fonts.googleapis.com"/>
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+	<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"/>
 	<link rel="stylesheet" href="/static/css/portal.css"/>
 </head>
 <body class="auth-shell">
@@ -30,7 +34,7 @@
 			<button type="submit" class="btn btn-primary">Iniciar sesión</button>
 		</form>
 
-		<p class="auth-footer"><a href="/">← Volver al portal</a></p>
+		<p class="auth-footer"><a href="/">{{ icon_chevron_left(cls='icon icon-sm') }} Volver al portal</a></p>
 	</div>
 	<script>
 		window.addEventListener('pageshow', function (event) {

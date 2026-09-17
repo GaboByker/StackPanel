@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """Portal inicial: elige entre proyectos independientes en distintos puertos."""
+import crypt
 import os
 import re
+import secrets
 import shutil
+import sqlite3
 from datetime import datetime, timedelta, timezone
 
 from flask import (
@@ -44,7 +47,12 @@ from docker_control import (
     containers_status,
     stop_containers,
     start_containers,
+    remove_containers,
+    remove_volumes,
     container_logs,
+    list_all_containers,
+    probe_http_port,
+    PROBE_HOST,
 )
 from system_monitor import get_system_metrics
 import panel_db
@@ -58,6 +66,8 @@ import db_viewer
 import db_autodetect
 import scheduler
 import docker_ops
+import sftp_control
+import project_git
 import subprocess
 import pyotp
 
@@ -186,8 +196,41 @@ def load_projects():
             'icon': icon_url,
             'folder': item.get('folder'),
             'containers': panel_db.project_containers(item),
+            'template': item.get('template'),
+            'monitor_health': bool(item.get('monitor_health', 1)),
+            'auto_backup': bool(item.get('auto_backup', 0)),
+            'cpu_limit': item.get('cpu_limit'),
+            'mem_limit_mb': item.get('mem_limit_mb'),
         })
     return projects
+
+
+def _donut_segments(categories):
+    """Arma los segmentos de un donut SVG (técnica stroke-dasharray sobre circunferencia=100).
+    categories: lista de (label, value, color)."""
+    total = sum(value for _, value, _ in categories)
+    segments = []
+    cumulative = 0.0
+    for label, value, color in categories:
+        pct = (value / total * 100) if total else 0
+        segments.append({
+            'label': label,
+            'value': value,
+            'pct': round(pct, 1),
+            'color': color,
+            'dasharray': f'{pct:.3f} {100 - pct:.3f}',
+            'dashoffset': round(25 - cumulative, 3),
+        })
+        cumulative += pct
+    return segments
+
+
+def _status_donut_segments(running, stopped, custom):
+    return _donut_segments([
+        ('En marcha', running, 'var(--success-text)'),
+        ('Detenidos', stopped, 'var(--danger-text)'),
+        ('Sin contenedor', custom, 'var(--text-faint)'),
+    ])
 
 
 def _require_admin():
@@ -352,11 +395,23 @@ def admin_panel():
     gate = _require_admin()
     if gate:
         return gate
-    services = [svc for svc in list_service_status() if svc['key'] != 'proxy']
+    all_services = list_service_status()
+    services = [svc for svc in all_services if svc['key'] != 'proxy']
+    managed_containers = {c for svc in all_services for c in svc['containers']}
+    docker_projects = []
+    for project in load_projects():
+        if not project['containers']:
+            continue
+        if managed_containers.intersection(project['containers']):
+            # Ya está cubierto por un servicio fijo (arriba); evita la tarjeta duplicada.
+            continue
+        project['docker_status'] = containers_status(project['containers'])
+        docker_projects.append(project)
     resp = make_response(
         render_template(
             'admin_panel.html',
             services=services,
+            docker_projects=docker_projects,
             public_host=get_public_host(),
         )
     )
@@ -369,17 +424,63 @@ def admin_projects():
     if gate:
         return gate
     projects = load_projects()
+    running = stopped = custom = with_db = 0
     for project in projects:
         project['docker_status'] = containers_status(project['containers']) if project['containers'] else None
         project['db_count'] = len(panel_db.list_databases(PORTAL_ROOT, project['db_id']))
+        if project['db_count']:
+            with_db += 1
+        if project['docker_status']:
+            if project['docker_status']['running']:
+                running += 1
+            else:
+                stopped += 1
+        else:
+            custom += 1
+    stats = {
+        'total': len(projects),
+        'running': running,
+        'stopped': stopped,
+        'custom': custom,
+        'with_db': with_db,
+        'auto_backup': sum(1 for p in projects if p['auto_backup']),
+        'monitored': sum(1 for p in projects if p['monitor_health']),
+    }
+    stats['donut_segments'] = _status_donut_segments(running, stopped, custom)
     resp = make_response(
         render_template(
             'admin_projects.html',
             projects=projects,
+            stats=stats,
             public_host=get_public_host(),
         )
     )
     return _no_cache(resp)
+
+
+@app.route('/admin/api/docker-ports')
+def admin_api_docker_ports():
+    if not get_admin_id():
+        return {'error': 'No autorizado'}, 401
+    containers, err = list_all_containers()
+    used_ports = {p['port'] for p in panel_db.list_projects_raw(PORTAL_ROOT) if p.get('port')}
+    ports = []
+    seen = set()
+    for c in containers:
+        if c['state'] != 'running':
+            continue
+        for port in c['host_ports']:
+            if port in seen:
+                continue
+            seen.add(port)
+            ports.append({
+                'port': port,
+                'container': c['name'],
+                'registered': port in used_ports,
+                'http_ok': probe_http_port(PROBE_HOST, port),
+            })
+    ports.sort(key=lambda p: p['port'])
+    return jsonify({'ports': ports, 'error': err or None})
 
 
 @app.route('/admin/projects/new', methods=['GET', 'POST'])
@@ -483,6 +584,144 @@ def admin_project_start(project_id):
         panel_db.log_action(PORTAL_ROOT, current_admin_email(), 'project_start', project['name'])
         flash('Proyecto iniciado.' if ok else f'No se pudo iniciar: {msg}', 'success' if ok else 'error')
     return redirect(url_for('admin_projects'))
+
+
+@app.route('/admin/projects/<int:project_id>/description', methods=['POST'])
+def admin_project_description(project_id):
+    if not get_admin_id():
+        return redirect(url_for('admin_login'))
+    project = panel_db.get_project(PORTAL_ROOT, project_id)
+    if not project:
+        abort(404)
+    panel_db.set_description(PORTAL_ROOT, project_id, request.form.get('description', ''))
+    panel_db.log_action(PORTAL_ROOT, current_admin_email(), 'project_description', project['name'])
+    flash('Descripción actualizada.', 'success')
+    return redirect(url_for('admin_project_detail', project_id=project_id))
+
+
+def _gen_sftp_password():
+    return secrets.token_urlsafe(9)
+
+
+def _hash_sftp_password(password):
+    return crypt.crypt(password, crypt.mksalt(crypt.METHOD_SHA512))
+
+
+@app.route('/admin/projects/<int:project_id>/sftp/create', methods=['POST'])
+def admin_project_sftp_create(project_id):
+    if not get_admin_id():
+        return redirect(url_for('admin_login'))
+    project = panel_db.get_project(PORTAL_ROOT, project_id)
+    if not project:
+        abort(404)
+    if not project.get('folder'):
+        # Proyectos agregados como "solo enlace" (sin carpeta propia) no
+        # tienen dónde recibir archivos todavía; se les crea una carpeta en
+        # html/ la primera vez que alguien pide un acceso SFTP.
+        folder = f"html/{project['project_key']}"
+        html_root = files_control.html_root(STACK_ROOT)
+        target_dir = os.path.join(html_root, project['project_key'])
+        os.makedirs(target_dir, exist_ok=True)
+        try:
+            os.chown(target_dir, -1, os.stat(html_root).st_gid)
+        except OSError:
+            pass
+        os.chmod(target_dir, 0o775)
+        panel_db.set_project_folder(PORTAL_ROOT, project_id, folder)
+        project['folder'] = folder
+
+    username = (request.form.get('username') or '').strip().lower()
+    if not panel_db.KEY_RE.match(username):
+        flash('El usuario debe ser minúsculas/números/guiones, sin espacios.', 'error')
+        return redirect(url_for('admin_project_detail', project_id=project_id))
+
+    custom_password = (request.form.get('password') or '').strip()
+    if custom_password and len(custom_password) < 8:
+        flash('La contraseña debe tener al menos 8 caracteres.', 'error')
+        return redirect(url_for('admin_project_detail', project_id=project_id))
+    password = custom_password or _gen_sftp_password()
+    try:
+        user = panel_db.create_sftp_user(PORTAL_ROOT, project_id, username, _hash_sftp_password(password))
+    except sqlite3.IntegrityError:
+        flash(f'El usuario "{username}" ya está en uso (los usuarios SFTP son únicos en todo el panel).', 'error')
+        return redirect(url_for('admin_project_detail', project_id=project_id))
+
+    allow_write = request.form.get('allow_write') == 'on'
+    if not allow_write:
+        panel_db.set_sftp_user_write(PORTAL_ROOT, user['id'], False)
+
+    ok, err = sftp_control.sync(PORTAL_ROOT, STACK_ROOT, HOST_STACK_ROOT)
+    panel_db.log_action(PORTAL_ROOT, current_admin_email(), 'sftp_create', f"{project['name']}: {username}")
+    if not ok:
+        flash(f'Acceso creado pero el servidor SFTP no se pudo actualizar: {err}', 'error')
+    else:
+        warning = ''
+        if allow_write and not sftp_control.folder_group_writable(STACK_ROOT, project['folder']):
+            warning = ' Aviso: la carpeta de este proyecto no es de escritura para el grupo, así que aunque diga "Escritura" no va a poder subir archivos hasta que ajustes los permisos de esa carpeta en el servidor.'
+        flash(
+            f'Acceso SFTP creado. Usuario: "{username}" · Contraseña: "{password}" '
+            f'(cópiala ahora, no se vuelve a mostrar) · Servidor: {get_public_host()}:{sftp_control.SFTP_PORT}.{warning}',
+            'success',
+        )
+    return redirect(url_for('admin_project_detail', project_id=project_id))
+
+
+@app.route('/admin/projects/<int:project_id>/sftp/<int:user_id>/toggle-write', methods=['POST'])
+def admin_project_sftp_toggle_write(project_id, user_id):
+    if not get_admin_id():
+        return redirect(url_for('admin_login'))
+    user = panel_db.get_sftp_user(PORTAL_ROOT, user_id)
+    if not user or user['project_id'] != project_id:
+        abort(404)
+    new_write = not user['allow_write']
+    panel_db.set_sftp_user_write(PORTAL_ROOT, user_id, new_write)
+    ok, err = sftp_control.sync(PORTAL_ROOT, STACK_ROOT, HOST_STACK_ROOT)
+    if not ok:
+        flash(f'Permiso guardado, pero el servidor SFTP no se pudo actualizar: {err}', 'error')
+    else:
+        project = panel_db.get_project(PORTAL_ROOT, project_id)
+        warning = ''
+        if new_write and project and project.get('folder') and not sftp_control.folder_group_writable(STACK_ROOT, project['folder']):
+            warning = ' Aviso: la carpeta de este proyecto no es de escritura para el grupo, así que no va a poder subir archivos hasta que ajustes los permisos en el servidor.'
+        flash('Permiso actualizado.' + warning, 'success')
+    return redirect(url_for('admin_project_detail', project_id=project_id))
+
+
+@app.route('/admin/projects/<int:project_id>/sftp/<int:user_id>/reset-password', methods=['POST'])
+def admin_project_sftp_reset_password(project_id, user_id):
+    if not get_admin_id():
+        return redirect(url_for('admin_login'))
+    user = panel_db.get_sftp_user(PORTAL_ROOT, user_id)
+    if not user or user['project_id'] != project_id:
+        abort(404)
+    custom_password = (request.form.get('password') or '').strip()
+    if custom_password and len(custom_password) < 8:
+        flash('La contraseña debe tener al menos 8 caracteres.', 'error')
+        return redirect(url_for('admin_project_detail', project_id=project_id))
+    password = custom_password or _gen_sftp_password()
+    panel_db.set_sftp_user_password(PORTAL_ROOT, user_id, _hash_sftp_password(password))
+    ok, err = sftp_control.sync(PORTAL_ROOT, STACK_ROOT, HOST_STACK_ROOT)
+    if not ok:
+        flash(f'Contraseña guardada pero el servidor SFTP no se pudo actualizar: {err}', 'error')
+    else:
+        flash(
+            f'Nueva contraseña para "{user["username"]}": "{password}" (cópiala ahora, no se vuelve a mostrar).',
+            'success',
+        )
+    return redirect(url_for('admin_project_detail', project_id=project_id))
+
+
+@app.route('/admin/projects/<int:project_id>/sftp/<int:user_id>/delete', methods=['POST'])
+def admin_project_sftp_delete(project_id, user_id):
+    if not get_admin_id():
+        return redirect(url_for('admin_login'))
+    user = panel_db.get_sftp_user(PORTAL_ROOT, user_id)
+    if not user or user['project_id'] != project_id:
+        abort(404)
+    panel_db.delete_sftp_user(PORTAL_ROOT, user_id)
+    ok, err = sftp_control.sync(PORTAL_ROOT, STACK_ROOT, HOST_STACK_ROOT)
+    flash('Acceso SFTP eliminado.' if ok else f'Acceso eliminado, pero el servidor SFTP no se pudo actualizar: {err}', 'success' if ok else 'error')
+    return redirect(url_for('admin_project_detail', project_id=project_id))
 
 
 @app.route('/admin/projects/<int:project_id>/monitor-toggle', methods=['POST'])
@@ -606,7 +845,31 @@ def admin_project_detail(project_id):
         has_git=has_git,
         has_env=has_env,
         can_clone=bool(project.get('template')),
+        repos=panel_db.project_repos(project),
+        sftp_users=panel_db.list_sftp_users(PORTAL_ROOT, project_id),
+        sftp_host=get_public_host(),
+        sftp_port=sftp_control.SFTP_PORT,
     )
+
+
+@app.route('/admin/projects/<int:project_id>/git-pull-repo/<role>', methods=['POST'])
+def admin_project_git_pull_repo(project_id, role):
+    if not get_admin_id():
+        return redirect(url_for('admin_login'))
+    project = panel_db.get_project(PORTAL_ROOT, project_id)
+    if not project or not project.get('folder'):
+        abort(404)
+    role = re.sub(r'[^a-z0-9-]+', '', (role or '').lower())
+    repo_folder = os.path.join(STACK_ROOT, project['folder'], role)
+    if not os.path.isdir(repo_folder):
+        abort(404)
+    ok, output = project_git.pull_repo(repo_folder)
+    if ok:
+        panel_db.log_action(PORTAL_ROOT, current_admin_email(), 'git_pull', f"{project['name']}/{role}")
+        flash(f'"{role}" actualizado: {output or "ya estaba al día."}', 'success')
+    else:
+        flash(f'git pull falló en "{role}": {output}', 'error')
+    return redirect(url_for('admin_project_detail', project_id=project_id))
 
 
 @app.route('/admin/projects/<int:project_id>/logs')
@@ -938,6 +1201,85 @@ def admin_project_install(template_key):
     return redirect(url_for('admin_projects'))
 
 
+@app.route('/admin/projects/from-git', methods=['GET', 'POST'])
+def admin_project_from_git():
+    gate = _require_admin()
+    if gate:
+        return gate
+    if request.method == 'GET':
+        return render_template('admin_project_from_git.html')
+
+    name = request.form.get('name', '').strip()
+    description = request.form.get('description', '').strip()
+    urls = request.form.getlist('repo_url')
+    branches = request.form.getlist('repo_branch')
+    roles = request.form.getlist('repo_role')
+    ports = request.form.getlist('repo_port')
+    commands = request.form.getlist('repo_command')
+    dockerfiles = request.form.getlist('repo_dockerfile')
+    try:
+        public_index = int(request.form.get('public_repo', 0))
+    except ValueError:
+        public_index = 0
+
+    if not name:
+        flash('El nombre del proyecto es obligatorio.', 'error')
+        return redirect(url_for('admin_project_from_git'))
+
+    repos = []
+    seen_roles = set()
+    for i, url in enumerate(urls):
+        url = (url or '').strip()
+        if not url:
+            continue
+        role = (roles[i] if i < len(roles) else '').strip() or f'repo{len(repos) + 1}'
+        role = re.sub(r'[^a-z0-9-]+', '-', role.lower()).strip('-') or f'repo{len(repos) + 1}'
+        if role in seen_roles:
+            flash(f'El rol "{role}" está repetido; usá nombres distintos para cada repositorio.', 'error')
+            return redirect(url_for('admin_project_from_git'))
+        seen_roles.add(role)
+        port_raw = (ports[i] if i < len(ports) else '').strip()
+        repos.append({
+            'url': url,
+            'branch': (branches[i] if i < len(branches) else '').strip() or None,
+            'role': role,
+            'container_port': int(port_raw) if port_raw.isdigit() else None,
+            'command': (commands[i] if i < len(commands) else '').strip() or None,
+            'dockerfile': (dockerfiles[i] if i < len(dockerfiles) else '').strip() or None,
+        })
+
+    if not repos:
+        flash('Agregá al menos un repositorio con su URL.', 'error')
+        return redirect(url_for('admin_project_from_git'))
+    if public_index >= len(repos):
+        public_index = 0
+
+    used_ports = set(p.get('port') for p in panel_db.list_projects_raw(PORTAL_ROOT) if p.get('port'))
+    public_port = app_templates.pick_free_port(used_ports)
+    if not public_port:
+        flash('No hay puertos libres disponibles.', 'error')
+        return redirect(url_for('admin_project_from_git'))
+
+    key = panel_db.reserve_key(PORTAL_ROOT, name)
+    local_folder, host_folder = _project_paths(key)
+    repos_result, containers, error, warnings = project_git.create_from_repos(
+        local_folder, host_folder, key, repos, public_index, public_port,
+    )
+    if error:
+        flash(f'No se pudo crear "{name}": {error}', 'error')
+        return redirect(url_for('admin_project_from_git'))
+
+    panel_db.insert_project(
+        PORTAL_ROOT, key, name, description, 'port', public_port, None, '/', None,
+        folder=f'html/{key}', containers=containers, volumes=[], template=None, secrets={}, repos=repos_result,
+    )
+    panel_db.log_action(PORTAL_ROOT, current_admin_email(), 'project_from_git', f'{name} ({len(repos)} repo(s))')
+    for warning in warnings:
+        flash(warning, 'error')
+    flash(f'"{name}" creado desde Git, corriendo en el puerto {public_port}.', 'success')
+    return redirect(url_for('admin_projects'))
+
+
 @app.route('/admin/projects/restore', methods=['GET', 'POST'])
 def admin_project_restore():
     gate = _require_admin()
@@ -1027,6 +1369,113 @@ def admin_files(subpath):
     return _no_cache(resp)
 
 
+def _project_owning_subpath(subpath):
+    """Encuentra el proyecto cuya carpeta (html/<folder>) contiene subpath,
+    para saber qué contenedores detener antes de borrar un archivo suyo."""
+    subpath = (subpath or '').strip('/')
+    for project in panel_db.list_projects_raw(PORTAL_ROOT):
+        folder = project.get('folder') or ''
+        if not folder.startswith('html/'):
+            continue
+        folder_rel = folder[5:].strip('/')
+        if not folder_rel:
+            continue
+        if subpath == folder_rel or subpath.startswith(folder_rel + '/'):
+            return project
+    return None
+
+
+def _stop_project_if_running(subpath):
+    """Si subpath pertenece a un proyecto con contenedores en marcha, los
+    detiene antes de una operación destructiva sobre sus archivos."""
+    project = _project_owning_subpath(subpath)
+    if not project:
+        return True, None
+    containers = panel_db.project_containers(project)
+    if not containers or not containers_status(containers).get('running'):
+        return True, None
+    ok, msg = stop_containers(containers)
+    if not ok:
+        return False, f'No se pudo detener "{project["name"]}": {msg}'
+    panel_db.set_desired_state(PORTAL_ROOT, project['id'], 'stopped')
+    panel_db.log_action(PORTAL_ROOT, current_admin_email(), 'project_stop', project['name'])
+    return True, None
+
+
+@app.route('/admin/files/<path:subpath>/delete', methods=['POST'])
+def admin_files_delete(subpath):
+    gate = _require_admin()
+    if gate:
+        return gate
+    try:
+        abs_path = files_control.safe_join(STACK_ROOT, subpath)
+    except files_control.PathError:
+        abort(404)
+    if not os.path.exists(abs_path):
+        abort(404)
+    is_dir = os.path.isdir(abs_path)
+
+    ok, err = _stop_project_if_running(subpath)
+    if not ok:
+        flash(err, 'error')
+        return redirect(url_for('admin_files', subpath=files_control.parent_of(subpath)))
+
+    try:
+        if is_dir:
+            files_control.delete_dir(STACK_ROOT, subpath)
+            flash('Carpeta eliminada.', 'success')
+            panel_db.log_action(PORTAL_ROOT, current_admin_email(), 'folder_delete', subpath)
+        else:
+            files_control.delete_file(STACK_ROOT, subpath)
+            flash('Archivo eliminado.', 'success')
+            panel_db.log_action(PORTAL_ROOT, current_admin_email(), 'file_delete', subpath)
+    except files_control.PathError as exc:
+        flash(str(exc), 'error')
+    return redirect(url_for('admin_files', subpath=files_control.parent_of(subpath)))
+
+
+@app.route('/admin/projects/<int:project_id>/wipe', methods=['POST'])
+def admin_project_wipe(project_id):
+    gate = _require_admin()
+    if gate:
+        return gate
+    project = panel_db.get_project(PORTAL_ROOT, project_id)
+    if not project:
+        abort(404)
+
+    containers = panel_db.project_containers(project)
+    volumes = panel_db.project_volumes(project)
+    folder = project.get('folder') or ''
+
+    if containers:
+        ok, msg = remove_containers(containers)
+        if not ok:
+            flash(f'No se pudieron eliminar los contenedores de "{project["name"]}": {msg}', 'error')
+            return redirect(url_for('admin_project_detail', project_id=project_id))
+
+    if volumes:
+        ok, msg = remove_volumes(volumes)
+        if not ok:
+            flash(
+                f'Contenedores de "{project["name"]}" eliminados, pero fallaron los volúmenes: {msg}',
+                'error',
+            )
+            return redirect(url_for('admin_project_detail', project_id=project_id))
+
+    if folder.startswith('html/'):
+        folder_rel = folder[5:].strip('/')
+        if folder_rel:
+            try:
+                files_control.delete_dir(STACK_ROOT, folder_rel)
+            except files_control.PathError:
+                pass
+
+    panel_db.delete_project(PORTAL_ROOT, project_id)
+    panel_db.log_action(PORTAL_ROOT, current_admin_email(), 'project_wipe', project['name'])
+    flash(f'"{project["name"]}" eliminado por completo: contenedores, volúmenes y archivos.', 'success')
+    return redirect(url_for('admin_projects'))
+
+
 @app.route('/admin/firewall')
 def admin_firewall():
     gate = _require_admin()
@@ -1051,12 +1500,28 @@ def admin_proxy():
         if p.get('access_mode') == 'port' and p.get('port')
     ]
     proxy_service = next((svc for svc in list_service_status() if svc['key'] == 'proxy'), None)
+    sites = panel_db.list_sites(PORTAL_ROOT)
+    ssl_active = sum(1 for s in sites if s.get('ssl_enabled'))
+    ssl_pending = len(sites) - ssl_active
+    managed = sum(1 for s in sites if s.get('managed'))
+    stats = {
+        'total': len(sites),
+        'ssl_active': ssl_active,
+        'ssl_pending': ssl_pending,
+        'managed': managed,
+        'custom': len(sites) - managed,
+        'donut_segments': _donut_segments([
+            ('SSL activo', ssl_active, 'var(--success-text)'),
+            ('SSL pendiente', ssl_pending, 'var(--warn-text)'),
+        ]),
+    }
     resp = make_response(
         render_template(
             'admin_proxy.html',
-            sites=panel_db.list_sites(PORTAL_ROOT),
+            sites=sites,
             port_projects=port_projects,
             proxy_service=proxy_service,
+            stats=stats,
         )
     )
     return _no_cache(resp)

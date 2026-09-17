@@ -1,8 +1,9 @@
 {% extends "base_admin.html" %}
+{% from '_icons.html' import icon_chevron_left, icon_arrow_up_right %}
 {% block title %}{{ project.name }}{% endblock %}
 {% block heading %}{{ project.name }}{% endblock %}
 {% block topbar_actions %}
-<a class="btn btn-secondary btn-sm" href="/admin/projects">← Proyectos</a>
+<a class="btn btn-secondary btn-sm" href="/admin/projects">{{ icon_chevron_left(cls='icon icon-sm') }} Proyectos</a>
 {% endblock %}
 {% block content %}
 
@@ -22,7 +23,7 @@
 		</p>
 	</div>
 	<div class="admin-actions" style="margin:0;">
-		{% if project.url %}<a class="btn btn-secondary btn-sm" href="{{ project.url }}" target="_blank" rel="noopener">Abrir ↗</a>{% endif %}
+		{% if project.url %}<a class="btn btn-secondary btn-sm" href="{{ project.url }}" target="_blank" rel="noopener">{{ icon_arrow_up_right(cls='icon icon-sm') }} Abrir</a>{% endif %}
 		{% if containers %}
 			{% if docker_status and docker_status.running %}
 			<form method="post" action="/admin/projects/{{ project.id }}/stop" style="display:inline;" onsubmit="return confirm('¿Detener {{ project.name }}?');">
@@ -39,143 +40,262 @@
 	</div>
 </div>
 
-<section class="detail-section">
-	<h2 class="detail-section-title">General</h2>
-	<p class="detail-section-hint">Accesos rápidos a lo más usado de este proyecto.</p>
-	<div class="admin-actions" style="margin:0;">
-		<a class="btn btn-secondary btn-sm" href="/admin/projects/{{ project.id }}/logs">Ver logs</a>
-		<a class="btn btn-secondary btn-sm" href="/admin/projects/{{ project.id }}/backup">Backup ahora</a>
-		{% if project.folder %}
-		<a class="btn btn-secondary btn-sm" href="/admin/files/{{ project.folder[5:] if project.folder.startswith('html/') else project.folder }}">Archivos</a>
-		{% endif %}
-		{% if has_env %}<a class="btn btn-secondary btn-sm" href="/admin/projects/{{ project.id }}/env">Variables de entorno</a>{% endif %}
+<div class="stats-grid">
+	<div class="stat-tile">
+		<div class="stat-tile-value">{{ containers|length if containers else 0 }}</div>
+		<div class="stat-tile-label">Contenedores</div>
 	</div>
-</section>
+	<div class="stat-tile accent-accent">
+		<div class="stat-tile-value">{{ databases|length }}</div>
+		<div class="stat-tile-label">Bases de datos</div>
+	</div>
+	<div class="stat-tile {{ 'accent-success' if project.auto_backup else '' }}">
+		<div class="stat-tile-value">{{ 'Activo' if project.auto_backup else 'Inactivo' }}</div>
+		<div class="stat-tile-label">Backup automático</div>
+		{% if project.auto_backup %}<div class="stat-tile-sub">{{ project.backup_hour if project.backup_hour is not none else 3 }}:00 · retiene {{ project.backup_retention or 7 }}</div>{% endif %}
+	</div>
+	<div class="stat-tile {{ 'accent-success' if project.monitor_health else '' }}">
+		<div class="stat-tile-value">{{ 'Sí' if project.monitor_health else 'No' }}</div>
+		<div class="stat-tile-label">Monitoreo de caídas</div>
+	</div>
+	<div class="stat-tile">
+		<div class="stat-tile-value">{{ project.cpu_limit if project.cpu_limit else '—' }}{% if project.cpu_limit %} CPU{% endif %}</div>
+		<div class="stat-tile-label">Límite de recursos</div>
+		{% if project.mem_limit_mb %}<div class="stat-tile-sub">{{ project.mem_limit_mb }} MB RAM</div>{% endif %}
+	</div>
+</div>
 
-<section class="detail-section">
-	<h2 class="detail-section-title">Monitoreo</h2>
-	<form method="post" action="/admin/projects/{{ project.id }}/monitor-toggle">
-		<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-		<label class="switch-row" style="max-width:420px;">
-			<span class="switch-row-label">Avisar si este proyecto se cae inesperadamente</span>
-			<span class="switch">
-				<input type="checkbox" onchange="this.form.submit()" {{ 'checked' if project.monitor_health else '' }}/>
-				<span class="switch-track"><span class="switch-thumb"></span></span>
-			</span>
-		</label>
-	</form>
-</section>
+<div class="detail-columns">
+	<div class="detail-col">
+		<section class="detail-section">
+			<h2 class="detail-section-title">General</h2>
+			<p class="detail-section-hint">Descripción que se muestra en la tarjeta del portal público.</p>
+			<form method="post" action="/admin/projects/{{ project.id }}/description" style="margin-bottom:16px;">
+				<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+				<div class="field">
+					<label for="description">Descripción</label>
+					<input type="text" id="description" name="description" value="{{ project.description or '' }}" placeholder="Una línea breve para la tarjeta del portal"/>
+				</div>
+				<button type="submit" class="btn btn-primary btn-sm">Guardar descripción</button>
+			</form>
+			<p class="detail-section-hint">Accesos rápidos a lo más usado de este proyecto.</p>
+			<div class="admin-actions" style="margin:0;">
+				<a class="btn btn-secondary btn-sm" href="/admin/projects/{{ project.id }}/logs">Ver logs</a>
+				<a class="btn btn-secondary btn-sm" href="/admin/projects/{{ project.id }}/backup">Backup ahora</a>
+				{% if project.folder %}
+				<a class="btn btn-secondary btn-sm" href="/admin/files/{{ project.folder[5:] if project.folder.startswith('html/') else project.folder }}">Archivos</a>
+				{% endif %}
+				{% if has_env %}<a class="btn btn-secondary btn-sm" href="/admin/projects/{{ project.id }}/env">Variables de entorno</a>{% endif %}
+			</div>
+		</section>
 
-<section class="detail-section">
-	<h2 class="detail-section-title">Backup automático</h2>
-	<p class="detail-section-hint">Horario propio de este proyecto — cada uno corre de forma independiente.</p>
-	<form method="post" action="/admin/projects/{{ project.id }}/backup-settings">
-		<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-		<label class="switch-row" style="max-width:420px; margin-bottom:16px;">
-			<span class="switch-row-label">Activar backup automático</span>
-			<span class="switch">
-				<input type="checkbox" name="auto_backup" {{ 'checked' if project.auto_backup else '' }}/>
-				<span class="switch-track"><span class="switch-thumb"></span></span>
-			</span>
-		</label>
-		<div class="field">
-			<label>Días de la semana</label>
-			{% set day_labels = [('0','Lun'), ('1','Mar'), ('2','Mié'), ('3','Jue'), ('4','Vie'), ('5','Sáb'), ('6','Dom')] %}
-			{% set selected_days = (project.backup_days or '').split(',') %}
-			<div style="display:flex; gap:10px; flex-wrap:wrap;">
-				{% for value, label in day_labels %}
-				<label class="checkbox-row" style="gap:4px;">
-					<input type="checkbox" name="backup_days" value="{{ value }}" {{ 'checked' if value in selected_days else '' }}/> {{ label }}
-				</label>
+		{% if repos %}
+		<section class="detail-section">
+			<h2 class="detail-section-title">Repositorios</h2>
+			<p class="detail-section-hint">
+				Este proyecto viene de Git. "git pull" trae los cambios a la carpeta; si el repo corre con imagen propia
+				(Dockerfile) hay que reconstruirla a mano para que el cambio se note — si corre con Python/Node, alcanza
+				con reiniciar el contenedor.
+			</p>
+			<div class="detail-section-body">
+				{% for r in repos %}
+				<div class="db-connection-row">
+					<div>
+						<strong>{{ r.role }}</strong>{% if r.public %} <span class="status-pill running">público</span>{% endif %}
+						<span class="status-pill custom">{{ r.kind }}</span><br/>
+						<code>{{ r.url }}</code>{% if r.branch %} · rama <code>{{ r.branch }}</code>{% endif %}
+					</div>
+					<form method="post" action="/admin/projects/{{ project.id }}/git-pull-repo/{{ r.role }}">
+						<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+						<button type="submit" class="btn btn-secondary btn-sm">git pull</button>
+					</form>
+				</div>
 				{% endfor %}
 			</div>
-		</div>
-		<div class="form-row">
-			<div class="field">
-				<label>Hora (0-23, hora del servidor)</label>
-				<input type="number" name="backup_hour" min="0" max="23" value="{{ project.backup_hour if project.backup_hour is not none else 3 }}"/>
-			</div>
-			<div class="field">
-				<label>Cuántos backups guardar (retención)</label>
-				<input type="number" name="backup_retention" min="1" max="60" value="{{ project.backup_retention or 7 }}"/>
-			</div>
-		</div>
-		<button type="submit" class="btn btn-primary btn-sm">Guardar horario</button>
-	</form>
-</section>
+		</section>
+		{% endif %}
 
-<section class="detail-section">
-	<h2 class="detail-section-title">Límites de recursos</h2>
-	<form method="post" action="/admin/projects/{{ project.id }}/limits">
-		<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-		<div class="form-row">
-			<div class="field">
-				<label>CPUs (ej. 0.5, 1, 2 — vacío = sin límite)</label>
-				<input type="text" name="cpu_limit" value="{{ project.cpu_limit or '' }}"/>
-			</div>
-			<div class="field">
-				<label>Memoria en MB (vacío = sin límite)</label>
-				<input type="number" name="mem_limit_mb" value="{{ project.mem_limit_mb or '' }}"/>
-			</div>
-		</div>
-		<button type="submit" class="btn btn-primary btn-sm">Aplicar límites</button>
-	</form>
-</section>
+		<section class="detail-section">
+			<h2 class="detail-section-title">Monitoreo</h2>
+			<form method="post" action="/admin/projects/{{ project.id }}/monitor-toggle">
+				<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+				<label class="switch-row" style="max-width:420px;">
+					<span class="switch-row-label">Avisar si este proyecto se cae inesperadamente</span>
+					<span class="switch">
+						<input type="checkbox" onchange="this.form.submit()" {{ 'checked' if project.monitor_health else '' }}/>
+						<span class="switch-track"><span class="switch-thumb"></span></span>
+					</span>
+				</label>
+			</form>
+		</section>
 
-{% if has_git %}
-<section class="detail-section">
-	<h2 class="detail-section-title">Git</h2>
-	<p class="detail-section-hint">Esta carpeta es un repositorio Git.</p>
-	<form method="post" action="/admin/projects/{{ project.id }}/git-pull">
-		<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-		<button type="submit" class="btn btn-primary btn-sm">git pull</button>
-	</form>
-</section>
-{% endif %}
-
-{% if can_clone %}
-<section class="detail-section">
-	<h2 class="detail-section-title">Clonar proyecto</h2>
-	<p class="detail-section-hint">Crea una copia de este proyecto con nombre y puerto nuevos.</p>
-	<form method="post" action="/admin/projects/{{ project.id }}/clone">
-		<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-		<div class="field" style="max-width:320px;">
-			<label>Nombre de la copia</label>
-			<input type="text" name="name" placeholder="{{ project.name }} copia"/>
-		</div>
-		<button type="submit" class="btn btn-primary btn-sm">Clonar</button>
-	</form>
-</section>
-{% endif %}
-
-<section class="detail-section">
-	<h2 class="detail-section-title">Bases de datos</h2>
-	<p class="detail-section-hint">Conecta la base de datos de este proyecto para explorarla desde el panel (solo lectura por defecto).</p>
-	<div class="detail-section-body">
-		{% for db in databases %}
-		<div class="db-connection-row">
-			<div>
-				<strong>{{ db.engine }}</strong> — {{ db.dbname }} <code>{{ db.host }}:{{ db.port }}</code>
-				<span class="status-pill {{ 'stopped' if not db.allow_write else 'running' }}" style="margin-left:6px;">{{ 'Escritura' if db.allow_write else 'Solo lectura' }}</span>
-			</div>
-			<div class="admin-actions" style="margin:0;">
-				<a class="btn btn-primary btn-sm" href="/admin/projects/{{ project.id }}/database/{{ db.id }}/view">Explorar</a>
-				<form method="post" action="/admin/projects/{{ project.id }}/database/{{ db.id }}/toggle-write" style="display:inline;">
-					<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-					<button type="submit" class="btn btn-secondary btn-sm">{{ 'Bloquear escritura' if db.allow_write else 'Permitir escritura' }}</button>
-				</form>
-				<form method="post" action="/admin/projects/{{ project.id }}/database/{{ db.id }}/delete" style="display:inline;" onsubmit="return confirm('¿Quitar esta conexión?');">
-					<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-					<button type="submit" class="btn btn-danger btn-sm">Quitar</button>
-				</form>
-			</div>
-		</div>
-		{% else %}
-		<p class="admin-hint" style="margin:0;">Aún no hay ninguna conectada.</p>
-		{% endfor %}
+		<section class="detail-section">
+			<h2 class="detail-section-title">Backup automático</h2>
+			<p class="detail-section-hint">Horario propio de este proyecto — cada uno corre de forma independiente.</p>
+			<form method="post" action="/admin/projects/{{ project.id }}/backup-settings">
+				<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+				<label class="switch-row" style="max-width:420px; margin-bottom:16px;">
+					<span class="switch-row-label">Activar backup automático</span>
+					<span class="switch">
+						<input type="checkbox" name="auto_backup" {{ 'checked' if project.auto_backup else '' }}/>
+						<span class="switch-track"><span class="switch-thumb"></span></span>
+					</span>
+				</label>
+				<div class="field">
+					<label>Días de la semana</label>
+					{% set day_labels = [('0','Lun'), ('1','Mar'), ('2','Mié'), ('3','Jue'), ('4','Vie'), ('5','Sáb'), ('6','Dom')] %}
+					{% set selected_days = (project.backup_days or '').split(',') %}
+					<div style="display:flex; gap:10px; flex-wrap:wrap;">
+						{% for value, label in day_labels %}
+						<label class="checkbox-row" style="gap:4px;">
+							<input type="checkbox" name="backup_days" value="{{ value }}" {{ 'checked' if value in selected_days else '' }}/> {{ label }}
+						</label>
+						{% endfor %}
+					</div>
+				</div>
+				<div class="form-row">
+					<div class="field">
+						<label>Hora (0-23, hora del servidor)</label>
+						<input type="number" name="backup_hour" min="0" max="23" value="{{ project.backup_hour if project.backup_hour is not none else 3 }}"/>
+					</div>
+					<div class="field">
+						<label>Cuántos backups guardar (retención)</label>
+						<input type="number" name="backup_retention" min="1" max="60" value="{{ project.backup_retention or 7 }}"/>
+					</div>
+				</div>
+				<button type="submit" class="btn btn-primary btn-sm">Guardar horario</button>
+			</form>
+		</section>
 	</div>
-	<p style="margin-top:16px;"><a class="btn btn-secondary btn-sm" href="/admin/projects/{{ project.id }}/database">+ Agregar / auto-detectar conexión</a></p>
-</section>
+
+	<div class="detail-col">
+		<section class="detail-section">
+			<h2 class="detail-section-title">Límites de recursos</h2>
+			<form method="post" action="/admin/projects/{{ project.id }}/limits">
+				<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+				<div class="form-row">
+					<div class="field">
+						<label>CPUs (ej. 0.5, 1, 2 — vacío = sin límite)</label>
+						<input type="text" name="cpu_limit" value="{{ project.cpu_limit or '' }}"/>
+					</div>
+					<div class="field">
+						<label>Memoria en MB (vacío = sin límite)</label>
+						<input type="number" name="mem_limit_mb" value="{{ project.mem_limit_mb or '' }}"/>
+					</div>
+				</div>
+				<button type="submit" class="btn btn-primary btn-sm">Aplicar límites</button>
+			</form>
+		</section>
+
+		{% if has_git %}
+		<section class="detail-section">
+			<h2 class="detail-section-title">Git</h2>
+			<p class="detail-section-hint">Esta carpeta es un repositorio Git.</p>
+			<form method="post" action="/admin/projects/{{ project.id }}/git-pull">
+				<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+				<button type="submit" class="btn btn-primary btn-sm">git pull</button>
+			</form>
+		</section>
+		{% endif %}
+
+		{% if can_clone %}
+		<section class="detail-section">
+			<h2 class="detail-section-title">Clonar proyecto</h2>
+			<p class="detail-section-hint">Crea una copia de este proyecto con nombre y puerto nuevos.</p>
+			<form method="post" action="/admin/projects/{{ project.id }}/clone">
+				<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+				<div class="field" style="max-width:320px;">
+					<label>Nombre de la copia</label>
+					<input type="text" name="name" placeholder="{{ project.name }} copia"/>
+				</div>
+				<button type="submit" class="btn btn-primary btn-sm">Clonar</button>
+			</form>
+		</section>
+		{% endif %}
+
+		<section class="detail-section">
+			<h2 class="detail-section-title">Bases de datos</h2>
+			<p class="detail-section-hint">Conecta la base de datos de este proyecto para explorarla desde el panel (solo lectura por defecto).</p>
+			<div class="detail-section-body">
+				{% for db in databases %}
+				<div class="db-connection-row">
+					<div>
+						<strong>{{ db.engine }}</strong> — {{ db.dbname }} <code>{{ db.host }}:{{ db.port }}</code>
+						<span class="status-pill {{ 'stopped' if not db.allow_write else 'running' }}" style="margin-left:6px;">{{ 'Escritura' if db.allow_write else 'Solo lectura' }}</span>
+					</div>
+					<div class="admin-actions" style="margin:0;">
+						<a class="btn btn-primary btn-sm" href="/admin/projects/{{ project.id }}/database/{{ db.id }}/view">Explorar</a>
+						<form method="post" action="/admin/projects/{{ project.id }}/database/{{ db.id }}/toggle-write" style="display:inline;">
+							<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+							<button type="submit" class="btn btn-secondary btn-sm">{{ 'Bloquear escritura' if db.allow_write else 'Permitir escritura' }}</button>
+						</form>
+						<form method="post" action="/admin/projects/{{ project.id }}/database/{{ db.id }}/delete" style="display:inline;" onsubmit="return confirm('¿Quitar esta conexión?');">
+							<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+							<button type="submit" class="btn btn-danger btn-sm">Quitar</button>
+						</form>
+					</div>
+				</div>
+				{% else %}
+				<p class="admin-hint" style="margin:0;">Aún no hay ninguna conectada.</p>
+				{% endfor %}
+			</div>
+			<p style="margin-top:16px;"><a class="btn btn-secondary btn-sm" href="/admin/projects/{{ project.id }}/database">+ Agregar / auto-detectar conexión</a></p>
+		</section>
+
+		<section class="detail-section">
+			<h2 class="detail-section-title">Acceso SFTP</h2>
+			<p class="detail-section-hint">
+				Cada usuario ve <strong>solo la carpeta de este proyecto</strong>, aislado del resto del stack.
+				Servidor: <code>{{ sftp_host }}:{{ sftp_port }}</code>. La contraseña se muestra una sola vez al crearlo o al restablecerla — cópiala en ese momento.
+				{% if not project.folder %}Este proyecto todavía no tiene carpeta propia — se crea una en <code>html/{{ project.project_key }}</code> automáticamente al crear el primer acceso.{% endif %}
+			</p>
+			<div class="detail-section-body">
+				{% for u in sftp_users %}
+				<div class="db-connection-row">
+					<div>
+						<strong>{{ u.username }}</strong>
+						<span class="status-pill {{ 'running' if u.allow_write else 'stopped' }}" style="margin-left:6px;">{{ 'Escritura' if u.allow_write else 'Solo lectura' }}</span>
+					</div>
+					<div class="admin-actions" style="margin:0;">
+						<form method="post" action="/admin/projects/{{ project.id }}/sftp/{{ u.id }}/toggle-write" style="display:inline;">
+							<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+							<button type="submit" class="btn btn-secondary btn-sm">{{ 'Bloquear escritura' if u.allow_write else 'Permitir escritura' }}</button>
+						</form>
+						<form method="post" action="/admin/projects/{{ project.id }}/sftp/{{ u.id }}/reset-password" class="sftp-reset-form" style="display:inline;">
+							<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+							<input type="hidden" name="password" value=""/>
+							<button type="submit" class="btn btn-secondary btn-sm">Restablecer contraseña</button>
+						</form>
+						<form method="post" action="/admin/projects/{{ project.id }}/sftp/{{ u.id }}/delete" style="display:inline;" onsubmit="return confirm('¿Quitar el acceso SFTP de \'{{ u.username }}\'?');">
+							<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+							<button type="submit" class="btn btn-danger btn-sm">Quitar</button>
+						</form>
+					</div>
+				</div>
+				{% else %}
+				<p class="admin-hint" style="margin:0;">Aún no hay ningún acceso creado.</p>
+				{% endfor %}
+			</div>
+			<form method="post" action="/admin/projects/{{ project.id }}/sftp/create" style="margin-top:16px;">
+				<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+				<div class="form-row">
+					<div class="field">
+						<label>Usuario</label>
+						<input type="text" name="username" placeholder="{{ project.project_key }}-cliente" required/>
+					</div>
+					<div class="field">
+						<label>Contraseña (opcional)</label>
+						<input type="text" name="password" minlength="8" placeholder="vacío = generar una al azar"/>
+					</div>
+				</div>
+				<label class="checkbox-row" style="margin:6px 0 12px;">
+					<input type="checkbox" name="allow_write" checked/> Permitir escritura (subir/editar/borrar archivos)
+				</label>
+				<button type="submit" class="btn btn-primary btn-sm">+ Crear acceso SFTP</button>
+			</form>
+		</section>
+	</div>
+</div>
 
 <section class="detail-section detail-section-danger">
 	<h2 class="detail-section-title">Zona de riesgo</h2>
@@ -184,6 +304,29 @@
 		<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
 		<button type="submit" class="btn btn-danger btn-sm">Quitar del portal</button>
 	</form>
+
+	<p class="detail-section-hint" style="margin-top:20px;">Elimina el proyecto por completo: detiene y borra sus contenedores, sus volúmenes de Docker (incluye bases de datos) y su carpeta en <code>html/</code>. No se puede deshacer.</p>
+	<form method="post" action="/admin/projects/{{ project.id }}/wipe" onsubmit="return confirm('ESTO BORRA CONTENEDORES, VOLÚMENES Y ARCHIVOS de \'{{ project.name }}\' de forma PERMANENTE.') && (prompt('Escribe el nombre del proyecto para confirmar: {{ project.name }}') === {{ project.name|tojson }});">
+		<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+		<button type="submit" class="btn btn-danger btn-sm">Eliminar todo (contenedores + volúmenes + archivos)</button>
+	</form>
 </section>
 
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.querySelectorAll('.sftp-reset-form').forEach(function (form) {
+	form.addEventListener('submit', function (ev) {
+		const pass = window.prompt('Nueva contraseña (mínimo 8 caracteres) — déjalo vacío para generar una al azar. Cancelar no hace nada.');
+		if (pass === null) { ev.preventDefault(); return; }
+		if (pass && pass.length < 8) {
+			window.alert('La contraseña debe tener al menos 8 caracteres.');
+			ev.preventDefault();
+			return;
+		}
+		form.querySelector('input[name="password"]').value = pass;
+	});
+});
+</script>
 {% endblock %}

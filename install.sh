@@ -100,6 +100,22 @@ fi
 sed -i.bak "s#^PORTAL_PORT=.*#PORTAL_PORT=${PORT}#" .env
 rm -f .env.bak
 
+# Puerto del SFTP (accesos por proyecto): mismo criterio que el del panel.
+# Si el .env es de una instalación anterior a esta funcionalidad, no tiene
+# la línea SFTP_PORT todavía — se agrega antes de intentar reemplazarla.
+grep -q '^SFTP_PORT=' .env || echo 'SFTP_PORT=2222' >> .env
+CONFIGURED_SFTP_PORT=$(grep '^SFTP_PORT=' .env | cut -d= -f2-)
+SFTP_PORT_FINAL="${SFTP_PORT:-${CONFIGURED_SFTP_PORT:-2222}}"
+if port_in_use "${SFTP_PORT_FINAL}"; then
+    ORIGINAL_SFTP_PORT="${SFTP_PORT_FINAL}"
+    while port_in_use "${SFTP_PORT_FINAL}"; do
+        SFTP_PORT_FINAL=$((SFTP_PORT_FINAL + 1))
+    done
+    echo "==> El puerto SFTP ${ORIGINAL_SFTP_PORT} está ocupado, uso el ${SFTP_PORT_FINAL} en su lugar."
+fi
+sed -i.bak "s#^SFTP_PORT=.*#SFTP_PORT=${SFTP_PORT_FINAL}#" .env
+rm -f .env.bak
+
 SKIP_PROXY=0
 BUSY_PORTS=""
 for p in 80 443; do

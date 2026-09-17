@@ -1,3 +1,4 @@
+{% from '_icons.html' import icon_arrow_right %}
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -7,6 +8,9 @@
 	<meta name="description" content="Elige el proyecto al que quieres entrar. Cada aplicación funciona de forma independiente."/>
 	<meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate"/>
 	<meta http-equiv="Pragma" content="no-cache"/>
+	<link rel="preconnect" href="https://fonts.googleapis.com"/>
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+	<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"/>
 	<link rel="stylesheet" href="/static/css/portal.css"/>
 </head>
 <body class="landing-page">
@@ -46,7 +50,7 @@
 					<div class="proyecto-card-body">
 						<h3>{{ project.name }}</h3>
 						<p>{{ project.description }}</p>
-						<span class="proyecto-card-link">Abrir proyecto →</span>
+						<span class="proyecto-card-link">Abrir proyecto {{ icon_arrow_right(cls='icon icon-sm') }}</span>
 					</div>
 				</a>
 				{% else %}

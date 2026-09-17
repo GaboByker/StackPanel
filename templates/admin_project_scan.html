@@ -34,7 +34,13 @@
 			</div>
 			<div class="field">
 				<label>Puerto</label>
-				<input type="number" name="port" min="1" max="65535" value="{{ c.port_guess or '' }}" required/>
+				<input type="number" name="port" min="1" max="65535" value="{{ c.port_guess or '' }}" list="ports-{{ loop.index }}" required/>
+				{% if c.port_options|length > 1 %}
+				<datalist id="ports-{{ loop.index }}">
+					{% for p in c.port_options %}<option value="{{ p }}"></option>{% endfor %}
+				</datalist>
+				<p class="field-hint">Este contenedor publica varios puertos ({{ c.port_options|join(', ') }}); se preseleccionó el que respondió HTTP. Revísalo antes de guardar.</p>
+				{% endif %}
 			</div>
 			<button type="submit" class="btn btn-primary btn-sm">Agregar al portal</button>
 		</form>

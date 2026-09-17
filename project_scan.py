@@ -37,13 +37,23 @@ def scan_candidates(stack_root, registered_folders):
         ]
         container_names = sorted({c['name'] for c in matched})
         ports = sorted({p for c in matched for p in c['host_ports']})
+        running = any(c['state'] == 'running' for c in matched)
+        # Si el contenedor publica varios puertos (p.ej. un dev server y el
+        # sitio real), probamos cuál responde HTTP en vez de asumir el más
+        # bajo; si ninguno responde (o no está corriendo) usamos el primero.
+        port_guess = None
+        if ports:
+            port_guess = docker_control.pick_http_port(ports) if running else None
+            if port_guess is None:
+                port_guess = ports[0]
 
         candidates.append({
             'folder': folder,
             'dir_name': dir_name,
             'name_guess': dir_name.replace('-', ' ').replace('_', ' ').title(),
             'containers': container_names,
-            'port_guess': ports[0] if ports else None,
-            'running': any(c['state'] == 'running' for c in matched),
+            'port_guess': port_guess,
+            'port_options': ports,
+            'running': running,
         })
     return candidates

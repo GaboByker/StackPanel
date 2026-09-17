@@ -10,8 +10,8 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY portal-server.py auth.py docker_control.py system_monitor.py panel_db.py proxy_control.py \
-     docker_ops.py backup_control.py files_control.py app_templates.py project_scan.py \
-     notification_control.py db_viewer.py db_autodetect.py scheduler.py projects.json ./
+     docker_ops.py sftp_control.py backup_control.py files_control.py app_templates.py project_scan.py \
+     project_git.py notification_control.py db_viewer.py db_autodetect.py scheduler.py projects.json ./
 COPY templates/ templates/
 COPY static/ static/
 

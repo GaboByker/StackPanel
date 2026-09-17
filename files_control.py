@@ -1,6 +1,7 @@
 """Explorador y editor básico de archivos, restringido a html/ (los
 proyectos). No da acceso al código del panel ni a nada fuera de esa carpeta."""
 import os
+import shutil
 
 MAX_EDIT_SIZE = 2 * 1024 * 1024  # 2 MiB
 BINARY_EXTENSIONS = {
@@ -80,6 +81,23 @@ def write_file(stack_root, rel_path, content):
         raise PathError('No es un archivo.')
     with open(abs_path, 'w', encoding='utf-8', newline='') as fh:
         fh.write(content)
+
+
+def delete_file(stack_root, rel_path):
+    abs_path = safe_join(stack_root, rel_path)
+    if not os.path.isfile(abs_path):
+        raise PathError('No es un archivo.')
+    os.remove(abs_path)
+
+
+def delete_dir(stack_root, rel_path):
+    abs_path = safe_join(stack_root, rel_path)
+    root = os.path.realpath(html_root(stack_root))
+    if abs_path == root:
+        raise PathError('No se puede eliminar la carpeta raíz de proyectos.')
+    if not os.path.isdir(abs_path):
+        raise PathError('No es una carpeta.')
+    shutil.rmtree(abs_path)
 
 
 def parent_of(rel_path):

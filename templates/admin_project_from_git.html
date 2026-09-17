@@ -1,0 +1,120 @@
+{% extends "base_admin.html" %}
+{% block title %}Desde Git{% endblock %}
+{% block heading %}Nuevo proyecto desde Git{% endblock %}
+{% block content %}
+
+<p class="admin-hint">
+	Cloná uno o más repositorios a una carpeta nueva bajo <code>html/</code>. Si un repo trae su propio
+	<code>Dockerfile</code>, se construye esa imagen; si no, se detecta Python/Node y se corre con una imagen
+	genérica (como "Instalar app"), o se sirve como sitio estático si sólo trae HTML. Agregá varios repos si tu
+	proyecto es backend + frontend separados: quedan en una red privada propia y se pueden llamar entre sí por su
+	"rol" (ej. el frontend le habla al backend como <code>http://backend:8000</code>).
+</p>
+
+<form method="post" style="max-width:720px;" id="git-form">
+	<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+
+	<div class="field">
+		<label for="name">Nombre del proyecto</label>
+		<input type="text" id="name" name="name" required autofocus placeholder="Mi app"/>
+	</div>
+	<div class="field">
+		<label for="description">Descripción</label>
+		<input type="text" id="description" name="description" placeholder="Una línea breve para la tarjeta del portal"/>
+	</div>
+
+	<div id="git-repos"></div>
+
+	<button type="button" class="btn btn-secondary btn-sm" id="git-add-repo" style="margin-bottom:20px;">+ Agregar otro repositorio</button>
+
+	<div>
+		<button type="submit" class="btn btn-primary">Crear proyecto</button>
+		<a class="btn btn-secondary" href="/admin/projects">Cancelar</a>
+	</div>
+</form>
+
+{% endblock %}
+
+{% block scripts %}
+<template id="git-repo-template">
+	<div class="git-repo-block">
+		<div class="git-repo-head">
+			<strong>Repositorio <span class="git-repo-num">1</span></strong>
+			<button type="button" class="btn btn-danger btn-sm git-repo-remove">Quitar</button>
+		</div>
+		<div class="field">
+			<label>URL del repositorio</label>
+			<input type="text" name="repo_url" required placeholder="https://github.com/usuario/backend.git"/>
+		</div>
+		<div class="form-row">
+			<div class="field">
+				<label>Rama</label>
+				<input type="text" name="repo_branch" placeholder="main"/>
+			</div>
+			<div class="field">
+				<label>Rol (nombre corto, sin espacios)</label>
+				<input type="text" name="repo_role" placeholder="backend"/>
+			</div>
+		</div>
+		<div class="form-row">
+			<div class="field">
+				<label>Puerto interno de la app</label>
+				<input type="number" name="repo_port" min="1" max="65535" placeholder="ej. 8000"/>
+				<p class="field-hint">El puerto en el que escucha la app adentro de su contenedor.</p>
+			</div>
+			<div class="field">
+				<label class="checkbox-row" style="margin-top:28px;">
+					<input type="radio" name="public_repo" value="0" class="git-repo-public"/>
+					Exponer al público
+				</label>
+				<p class="field-hint">Sólo uno de los repos necesita esto: el que sirve la app hacia afuera.</p>
+			</div>
+		</div>
+		<details>
+			<summary>Avanzado</summary>
+			<div class="form-row" style="margin-top:12px;">
+				<div class="field">
+					<label>Comando de inicio (opcional)</label>
+					<input type="text" name="repo_command" placeholder="se detecta automático si se deja vacío"/>
+				</div>
+				<div class="field">
+					<label>Ruta del Dockerfile (opcional)</label>
+					<input type="text" name="repo_dockerfile" placeholder="Dockerfile"/>
+				</div>
+			</div>
+		</details>
+	</div>
+</template>
+<script>
+(function () {
+	const list = document.getElementById('git-repos');
+	const tpl = document.getElementById('git-repo-template');
+	const addBtn = document.getElementById('git-add-repo');
+
+	function renumber() {
+		const blocks = list.querySelectorAll('.git-repo-block');
+		blocks.forEach(function (block, i) {
+			block.querySelector('.git-repo-num').textContent = i + 1;
+			block.querySelector('.git-repo-public').value = i;
+			block.querySelector('.git-repo-remove').style.display = blocks.length > 1 ? '' : 'none';
+		});
+		if (blocks.length && !list.querySelector('.git-repo-public:checked')) {
+			blocks[0].querySelector('.git-repo-public').checked = true;
+		}
+	}
+
+	function addRepo() {
+		const node = tpl.content.cloneNode(true);
+		node.querySelector('.git-repo-remove').addEventListener('click', function (e) {
+			e.target.closest('.git-repo-block').remove();
+			renumber();
+		});
+		list.appendChild(node);
+		renumber();
+	}
+
+	addBtn.addEventListener('click', addRepo);
+	addRepo();
+})();
+</script>
+{% endblock %}

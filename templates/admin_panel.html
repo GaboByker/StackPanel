@@ -1,4 +1,5 @@
 {% extends "base_admin.html" %}
+{% from '_icons.html' import icon_arrow_up_right %}
 {% block title %}Resumen{% endblock %}
 {% block heading %}Resumen{% endblock %}
 {% block content %}
@@ -87,6 +88,34 @@
 			</form>
 			{% else %}
 			<form method="post" action="/admin/containers/{{ svc.key }}/start">
+				<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+				<button type="submit" class="btn btn-primary btn-sm">Iniciar</button>
+			</form>
+			{% endif %}
+		</div>
+	</article>
+	{% endfor %}
+	{% for p in docker_projects %}
+	<article class="admin-service-card">
+		<div class="admin-service-head">
+			<h3>{{ p.name }}</h3>
+			<span class="status-pill {{ 'running' if p.docker_status.running else 'stopped' }}">
+				{{ 'En marcha' if p.docker_status.running else p.docker_status.state }}
+			</span>
+		</div>
+		<p><strong>Contenedor{% if p.containers|length > 1 %}es{% endif %}:</strong>
+			{% for c in p.containers %}<code>{{ c }}</code>{% if not loop.last %} {% endif %}{% endfor %}
+		</p>
+		<p><strong>Puerto:</strong> <code>{{ public_host }}:{{ p.port }}</code></p>
+		<div class="admin-actions">
+			<a class="btn btn-secondary btn-sm" href="{{ p.url }}" target="_blank" rel="noopener">{{ icon_arrow_up_right(cls='icon icon-sm') }} Abrir</a>
+			{% if p.docker_status.running %}
+			<form method="post" action="/admin/projects/{{ p.db_id }}/stop" style="display:inline;" onsubmit="return confirm('¿Detener {{ p.name }}?');">
+				<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+				<button type="submit" class="btn btn-danger btn-sm">Detener</button>
+			</form>
+			{% else %}
+			<form method="post" action="/admin/projects/{{ p.db_id }}/start" style="display:inline;">
 				<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
 				<button type="submit" class="btn btn-primary btn-sm">Iniciar</button>
 			</form>
@@ -191,7 +220,9 @@
 		return d.innerHTML;
 	}
 
+	const POLL_INTERVAL_MS = 6000;
 	let pollTimer = null;
+	let stopped = false;
 
 	async function poll() {
 		try {
@@ -201,15 +232,19 @@
 		} catch (err) {
 			errorEl.hidden = false;
 			errorEl.textContent = 'Error al obtener métricas: ' + err.message;
+		} finally {
+			// Se agenda la siguiente vuelta recién cuando esta termina, para no
+			// acumular peticiones si el servidor tarda más que el intervalo.
+			if (!stopped) { pollTimer = setTimeout(poll, POLL_INTERVAL_MS); }
 		}
 	}
 
 	poll();
-	pollTimer = setInterval(poll, 2000);
 
 	document.querySelectorAll('.logout-form').forEach(function (form) {
 		form.addEventListener('submit', function () {
-			if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+			stopped = true;
+			if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
 		});
 	});
 })();

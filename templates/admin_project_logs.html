@@ -1,8 +1,9 @@
 {% extends "base_admin.html" %}
+{% from '_icons.html' import icon_chevron_left %}
 {% block title %}Logs · {{ project.name }}{% endblock %}
 {% block heading %}Logs — {{ project.name }}{% endblock %}
 {% block topbar_actions %}
-<a class="btn btn-secondary btn-sm" href="/admin/projects/{{ project.id }}">← {{ project.name }}</a>
+<a class="btn btn-secondary btn-sm" href="/admin/projects/{{ project.id }}">{{ icon_chevron_left(cls='icon icon-sm') }} {{ project.name }}</a>
 {% endblock %}
 {% block content %}
 

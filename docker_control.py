@@ -263,15 +263,40 @@ def _start_container(container, states=None):
     return False, err
 
 
-def _health_check(container, port, path='/'):
-    url = f'http://{container}:{port}{path}'
+# Host desde el que el contenedor del portal puede alcanzar los puertos que
+# otros contenedores publican en el host (vía extra_hosts en docker-compose).
+PROBE_HOST = os.environ.get('DOCKER_HOST_PROBE', 'host.docker.internal')
+
+
+def probe_http_port(host, port, path='/', timeout=1.5):
+    """True si `host:port` responde HTTP. Se usa para adivinar, entre varios
+    puertos publicados por un mismo contenedor, cuál sirve la app (no
+    siempre es el más bajo: p.ej. un contenedor puede publicar 5175 para un
+    dev server y 8080 para el sitio real)."""
+    url = f'http://{host}:{port}{path}'
     try:
-        with urllib.request.urlopen(url, timeout=3) as response:
+        with urllib.request.urlopen(url, timeout=timeout) as response:
             return response.status < 500
     except urllib.error.HTTPError as exc:
         return exc.code < 500
-    except OSError:
+    except (OSError, http.client.HTTPException, ValueError):
+        # No-HTTP (puerto de una base de datos, etc.) manda bytes crudos que
+        # rompen el parser HTTP (BadStatusLine); eso también cuenta como "no
+        # responde HTTP", no como un error que deba tumbar la petición.
         return False
+
+
+def pick_http_port(ports, host=None, path='/'):
+    """De una lista de puertos candidatos, devuelve el primero que responde
+    HTTP contra `host` (por defecto PROBE_HOST). None si ninguno responde."""
+    for port in ports:
+        if probe_http_port(host or PROBE_HOST, port, path):
+            return port
+    return None
+
+
+def _health_check(container, port, path='/'):
+    return probe_http_port(container, port, path, timeout=3)
 
 
 def list_service_status():
@@ -507,6 +532,42 @@ def start_containers(containers):
             return False, err
         started.append(container)
     return True, ', '.join(started) if started else 'ya estaba en marcha'
+
+
+def remove_container(container):
+    """Detiene (si hace falta) y elimina (docker rm -f -v) un contenedor."""
+    _stop_container(container)
+    _, err = _docker_request('DELETE', f'/containers/{container}?force=1&v=1', timeout=20)
+    if err and '404' not in err:
+        return False, err
+    return True, ''
+
+
+def remove_containers(containers):
+    removed, errors = [], []
+    for container in containers:
+        ok, err = remove_container(container)
+        (removed if ok else errors).append(container if ok else f'{container}: {err}')
+    if errors:
+        return False, '; '.join(errors)
+    return True, ', '.join(removed) if removed else 'sin contenedores'
+
+
+def remove_volume(name):
+    _, err = _docker_request('DELETE', f'/volumes/{name}?force=1', timeout=20)
+    if err and '404' not in err:
+        return False, err
+    return True, ''
+
+
+def remove_volumes(volumes):
+    removed, errors = [], []
+    for name in volumes:
+        ok, err = remove_volume(name)
+        (removed if ok else errors).append(name if ok else f'{name}: {err}')
+    if errors:
+        return False, '; '.join(errors)
+    return True, ', '.join(removed) if removed else 'sin volúmenes'
 
 
 def container_to_project_map():

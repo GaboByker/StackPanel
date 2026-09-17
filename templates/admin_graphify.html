@@ -1,4 +1,5 @@
 {% extends "base_admin.html" %}
+{% from '_icons.html' import icon_share, icon_arrow_right %}
 {% block title %}Grafos{% endblock %}
 {% block heading %}Grafos Graphify{% endblock %}
 {% block content %}
@@ -9,12 +10,12 @@
 <div class="proyectos-grid">
 	{% for g in graphs %}
 	<article class="proyecto-card" style="cursor:default;">
-		<div class="proyecto-card-icon proyecto-card-icon--placeholder" aria-hidden="true">◈</div>
+		<div class="proyecto-card-icon proyecto-card-icon--placeholder" aria-hidden="true">{{ icon_share() }}</div>
 		<div class="proyecto-card-body">
 			<h3>{{ g.name }}</h3>
 			<p><code>{{ g.folder }}/graphify-out</code></p>
 			<p style="margin-top:10px;">
-				<a class="proyecto-card-link" href="{{ g.url }}" target="_blank" rel="noopener">Abrir grafo →</a>
+				<a class="proyecto-card-link" href="{{ g.url }}" target="_blank" rel="noopener">Abrir grafo {{ icon_arrow_right(cls='icon icon-sm') }}</a>
 				{% if g.report_url %} · <a href="{{ g.report_url }}" target="_blank" rel="noopener">Reporte</a>{% endif %}
 			</p>
 		</div>

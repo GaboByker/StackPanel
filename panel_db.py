@@ -174,6 +174,19 @@ def init_db(root):
             )
             '''
         )
+        conn.execute(
+            '''
+            CREATE TABLE IF NOT EXISTS sftp_users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                password_hash TEXT NOT NULL,
+                uid INTEGER NOT NULL UNIQUE,
+                allow_write INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL
+            )
+            '''
+        )
 
 
 def _migrate_projects_columns(conn):
@@ -193,6 +206,7 @@ def _migrate_projects_columns(conn):
         'backup_days': "ALTER TABLE projects ADD COLUMN backup_days TEXT NOT NULL DEFAULT '0,1,2,3,4,5,6'",
         'backup_hour': "ALTER TABLE projects ADD COLUMN backup_hour INTEGER NOT NULL DEFAULT 3",
         'last_auto_backup_date': "ALTER TABLE projects ADD COLUMN last_auto_backup_date TEXT",
+        'repos': "ALTER TABLE projects ADD COLUMN repos TEXT",
     }
     for column, ddl in additions.items():
         if column not in existing:
@@ -368,21 +382,21 @@ def reserve_key(root, name):
 
 
 def insert_project(root, key, name, description, access_mode, port, domain, path, icon_path,
-                    folder=None, containers=None, volumes=None, template=None, secrets=None):
+                    folder=None, containers=None, volumes=None, template=None, secrets=None, repos=None):
     with _connect(root) as conn:
         max_sort = conn.execute('SELECT COALESCE(MAX(sort_order), 0) FROM projects').fetchone()[0]
         cur = conn.execute(
             '''
             INSERT INTO projects
                 (project_key, name, description, access_mode, port, domain, path, icon_path,
-                 sort_order, created_at, folder, containers, volumes, template, secrets)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 sort_order, created_at, folder, containers, volumes, template, secrets, repos)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''',
             (
                 key, name, (description or '').strip(), access_mode, port, domain, path,
                 (icon_path or '').strip() or None, max_sort + 1, _now(),
                 folder, json.dumps(containers or []), json.dumps(volumes or []), template,
-                json.dumps(secrets or {}),
+                json.dumps(secrets or {}), json.dumps(repos or []),
             ),
         )
         project_id = cur.lastrowid
@@ -439,6 +453,13 @@ def project_secrets(project):
         return {}
 
 
+def project_repos(project):
+    try:
+        return json.loads(project.get('repos') or '[]')
+    except (TypeError, ValueError):
+        return []
+
+
 def delete_project(root, project_id):
     with _connect(root) as conn:
         conn.execute('DELETE FROM projects WHERE id = ?', (project_id,))
@@ -447,6 +468,19 @@ def delete_project(root, project_id):
 def set_desired_state(root, project_id, state):
     with _connect(root) as conn:
         conn.execute('UPDATE projects SET desired_state = ? WHERE id = ?', (state, project_id))
+
+
+def set_project_folder(root, project_id, folder):
+    with _connect(root) as conn:
+        conn.execute('UPDATE projects SET folder = ? WHERE id = ?', (folder, project_id))
+
+
+def set_description(root, project_id, description):
+    with _connect(root) as conn:
+        conn.execute(
+            'UPDATE projects SET description = ? WHERE id = ?',
+            ((description or '').strip(), project_id),
+        )
 
 
 def set_monitor_health(root, project_id, enabled):
@@ -565,6 +599,59 @@ def set_database_allow_write(root, db_id, allow_write):
 def delete_database(root, db_id):
     with _connect(root) as conn:
         conn.execute('DELETE FROM project_databases WHERE id = ?', (db_id,))
+
+
+# --- accesos SFTP por proyecto ----------------------------------------------
+# uid arranca en 3000 para no chocar con usuarios/servicios del sistema.
+_SFTP_UID_BASE = 3000
+
+
+def list_sftp_users(root, project_id=None):
+    with _connect(root) as conn:
+        if project_id is None:
+            rows = conn.execute('SELECT * FROM sftp_users ORDER BY username').fetchall()
+        else:
+            rows = conn.execute(
+                'SELECT * FROM sftp_users WHERE project_id = ? ORDER BY id', (project_id,)
+            ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def get_sftp_user(root, user_id):
+    with _connect(root) as conn:
+        row = conn.execute('SELECT * FROM sftp_users WHERE id = ?', (user_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def create_sftp_user(root, project_id, username, password_hash):
+    with _connect(root) as conn:
+        next_uid = conn.execute(
+            'SELECT COALESCE(MAX(uid), ?) + 1 FROM sftp_users', (_SFTP_UID_BASE - 1,)
+        ).fetchone()[0]
+        cur = conn.execute(
+            '''
+            INSERT INTO sftp_users (project_id, username, password_hash, uid, allow_write, created_at)
+            VALUES (?, ?, ?, ?, 1, ?)
+            ''',
+            (project_id, username, password_hash, next_uid, _now()),
+        )
+        user_id = cur.lastrowid
+    return get_sftp_user(root, user_id)
+
+
+def set_sftp_user_password(root, user_id, password_hash):
+    with _connect(root) as conn:
+        conn.execute('UPDATE sftp_users SET password_hash = ? WHERE id = ?', (password_hash, user_id))
+
+
+def set_sftp_user_write(root, user_id, allow_write):
+    with _connect(root) as conn:
+        conn.execute('UPDATE sftp_users SET allow_write = ? WHERE id = ?', (1 if allow_write else 0, user_id))
+
+
+def delete_sftp_user(root, user_id):
+    with _connect(root) as conn:
+        conn.execute('DELETE FROM sftp_users WHERE id = ?', (user_id,))
 
 
 # --- auditoría --------------------------------------------------------------

@@ -11,6 +11,7 @@ Un panel de administración autoalojado (self-hosted) para gestionar múltiples 
 - **Bases de datos**: visor/autodetección de BDs por proyecto (SQLite/MySQL/Postgres), toggle de escritura
 - **Proxy reverso + SSL**: generación de sitios Nginx y emisión de certificados SSL hablando directo con el socket de Docker
 - **Explorador de archivos** por proyecto
+- **Accesos SFTP por proyecto**: usuarios aislados (chroot, uno no ve la carpeta del otro) con lectura/escritura configurable, sin tocar código ni `docker-compose.yml`
 - **Notificaciones**: alertas a Discord/Slack/Email configurables por el propio admin
 - **Seguridad**: autenticación de administradores con 2FA (TOTP), gestión de admins, auditoría, firewall
 - **Grafos de código**: integración con Graphify para visualizar la estructura de cada proyecto desde el panel
@@ -38,7 +39,7 @@ curl -fsSL https://raw.githubusercontent.com/GaboByker/StackPanel/main/install.s
 
 Descarga el código, crea las carpetas de datos (`html/`, `backups/`, `proxy/sites/`, `instance/`), genera un `.env` con una clave nueva y levanta los contenedores. Al final te tira la URL — la primera vez entra al asistente de configuración para crear el admin.
 
-**Puertos:** el del panel (5005 por defecto) se puede cambiar solo si está ocupado. El 80 y 443 los necesita el proxy/SSL y sí tienen que estar libres — si no, el instalador arranca igual pero sin proxy.
+**Puertos:** el del panel (5005 por defecto) y el de SFTP (2222 por defecto, solo se usa si creás algún acceso) se pueden cambiar solos si están ocupados. El 80 y 443 los necesita el proxy/SSL y sí tienen que estar libres — si no, el instalador arranca igual pero sin proxy.
 
 Para instalar en otra carpeta o rama:
 

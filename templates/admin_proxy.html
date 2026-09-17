@@ -5,117 +5,176 @@
 
 <p class="admin-hint">Todo el tráfico de dominios entra por el proxy central (puertos 80/443) y se reenvía al destino interno indicado. Al crear un sitio queda activo primero por HTTP; emite el SSL cuando el DNS del dominio ya apunte a este servidor.</p>
 
-{% if proxy_service %}
-<article class="admin-service-card" style="margin-bottom:24px; max-width:420px;">
-	<div class="admin-service-head">
-		<h3>{{ proxy_service.label }}</h3>
-		<span class="status-pill {{ 'running' if proxy_service.running else 'stopped' }}">
-			{% if proxy_service.running %}En marcha{% elif proxy_service.state == 'missing' %}No encontrado{% else %}Detenido{% endif %}
-		</span>
+<div class="stats-grid">
+	<div class="stat-tile">
+		<div class="stat-tile-value">{{ stats.total }}</div>
+		<div class="stat-tile-label">Sitios</div>
 	</div>
-	<p><strong>Contenedores:</strong> {% for c in proxy_service.containers %}<code>{{ c }}</code>{% if not loop.last %} {% endif %}{% endfor %}</p>
-	<p><strong>Datos:</strong> <code>{{ proxy_service.database }}</code></p>
-	{% if proxy_service.error %}<p class="admin-service-error"><strong>Aviso:</strong> {{ proxy_service.error }}</p>{% endif %}
-	<div class="admin-actions">
-		{% if proxy_service.running %}
-		<form method="post" action="/admin/containers/proxy/stop" onsubmit="return confirm('¿Detener el proxy? Todos los dominios dejarán de responder mientras esté apagado.');">
-			<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-			<button type="submit" class="btn btn-danger btn-sm">Detener proxy</button>
-		</form>
-		{% else %}
-		<form method="post" action="/admin/containers/proxy/start">
-			<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-			<button type="submit" class="btn btn-primary btn-sm">Iniciar proxy</button>
-		</form>
-		{% endif %}
+	<div class="stat-tile accent-success">
+		<div class="stat-tile-value">{{ stats.ssl_active }}</div>
+		<div class="stat-tile-label">Con SSL activo</div>
 	</div>
-</article>
-{% endif %}
-
-<h2 class="landing-section-title">Sitios activos</h2>
-
-{% if sites %}
-<div class="admin-table-wrap">
-	<table class="admin-table">
-		<thead>
-			<tr>
-				<th>Dominio</th>
-				<th>Destino</th>
-				<th>SSL</th>
-				<th>Origen</th>
-				<th></th>
-			</tr>
-		</thead>
-		<tbody>
-			{% for s in sites %}
-			<tr>
-				<td><a href="https://{{ s.domain }}" target="_blank" rel="noopener">{{ s.domain }}</a></td>
-				<td><code>{{ s.target_host }}:{{ s.target_port }}</code></td>
-				<td>
-					<span class="status-pill {{ 'running' if s.ssl_enabled else 'pending' }}">
-						{{ 'Activo' if s.ssl_enabled else 'Pendiente' }}
-					</span>
-				</td>
-				<td>
-					<span class="status-pill custom">{{ 'Generado por el panel' if s.managed else 'Config personalizado' }}</span>
-				</td>
-				<td style="white-space:nowrap;">
-					{% if s.managed %}
-					<form method="post" action="/admin/proxy/{{ s.id }}/ssl" style="display:inline;" onsubmit="return confirm('¿Emitir/renovar el certificado SSL de {{ s.domain }}?');">
-						<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-						<button type="submit" class="btn btn-secondary btn-sm">{{ 'Renovar SSL' if s.ssl_enabled else 'Emitir SSL' }}</button>
-					</form>
-					<form method="post" action="/admin/proxy/{{ s.id }}/delete" style="display:inline;" onsubmit="return confirm('¿Eliminar el sitio {{ s.domain }} del proxy?');">
-						<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-						<button type="submit" class="btn btn-danger btn-sm">Eliminar</button>
-					</form>
-					{% else %}
-					<form method="post" action="/admin/proxy/{{ s.id }}/ssl" style="display:inline;" onsubmit="return confirm('¿Renovar el certificado SSL de {{ s.domain }}?');">
-						<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-						<button type="submit" class="btn btn-secondary btn-sm">Renovar SSL</button>
-					</form>
-					{% endif %}
-				</td>
-			</tr>
-			{% endfor %}
-		</tbody>
-	</table>
+	<div class="stat-tile">
+		<div class="stat-tile-value">{{ stats.ssl_pending }}</div>
+		<div class="stat-tile-label">SSL pendiente</div>
+	</div>
+	<div class="stat-tile accent-accent">
+		<div class="stat-tile-value">{{ stats.managed }}</div>
+		<div class="stat-tile-label">Generados por el panel</div>
+	</div>
 </div>
-{% else %}
-<p class="empty-state">Aún no hay sitios configurados.</p>
+
+{% if stats.total %}
+<div class="donut-card" style="margin-bottom:28px; max-width:520px;">
+	<div class="donut-wrap">
+		<svg class="donut-svg" viewBox="0 0 42 42" role="img" aria-label="Estado de los certificados SSL">
+			<circle cx="21" cy="21" r="15.91549430918954" fill="transparent" stroke="var(--surface-2)" stroke-width="5"></circle>
+			{% for seg in stats.donut_segments %}
+			{% if seg.value %}
+			<circle cx="21" cy="21" r="15.91549430918954" fill="transparent" stroke="{{ seg.color }}" stroke-width="5"
+				stroke-dasharray="{{ seg.dasharray }}" stroke-dashoffset="{{ seg.dashoffset }}">
+				<title>{{ seg.label }}: {{ seg.value }} ({{ seg.pct }}%)</title>
+			</circle>
+			{% endif %}
+			{% endfor %}
+		</svg>
+		<div class="donut-center">
+			<span class="donut-center-value">{{ stats.total }}</span>
+			<span class="donut-center-label">sitios</span>
+		</div>
+	</div>
+	<div class="donut-legend">
+		{% for seg in stats.donut_segments %}
+		<div class="donut-legend-row">
+			<span class="donut-legend-dot" style="background:{{ seg.color }};"></span>
+			<span class="donut-legend-label">{{ seg.label }}</span>
+			<span class="donut-legend-value">{{ seg.value }} · {{ seg.pct }}%</span>
+		</div>
+		{% endfor %}
+	</div>
+</div>
 {% endif %}
 
-<h2 class="landing-section-title" style="margin-top:32px;">Nuevo sitio</h2>
-<p class="admin-hint">Para publicar un proyecto completo (tarjeta del portal + dominio) usa mejor <a href="/admin/projects/new">Nuevo proyecto</a>. Este formulario solo agrega el enrutamiento de un dominio suelto.</p>
+<div class="sidebar-layout">
+	<div class="sidebar-col">
+		<section class="detail-section">
+			<h2 class="detail-section-title">Sitios activos</h2>
+			<p class="detail-section-hint">Dominios enrutados por el proxy hacia un destino interno.</p>
+			{% if sites %}
+			<div class="admin-table-wrap">
+				<table class="admin-table">
+					<thead>
+						<tr>
+							<th>Dominio</th>
+							<th>Destino</th>
+							<th>SSL</th>
+							<th>Origen</th>
+							<th></th>
+						</tr>
+					</thead>
+					<tbody>
+						{% for s in sites %}
+						<tr>
+							<td><a href="https://{{ s.domain }}" target="_blank" rel="noopener">{{ s.domain }}</a></td>
+							<td><code>{{ s.target_host }}:{{ s.target_port }}</code></td>
+							<td>
+								<span class="status-pill {{ 'running' if s.ssl_enabled else 'pending' }}">
+									{{ 'Activo' if s.ssl_enabled else 'Pendiente' }}
+								</span>
+							</td>
+							<td>
+								<span class="status-pill custom">{{ 'Panel' if s.managed else 'Personalizado' }}</span>
+							</td>
+							<td style="white-space:nowrap;">
+								{% if s.managed %}
+								<form method="post" action="/admin/proxy/{{ s.id }}/ssl" style="display:inline;" onsubmit="return confirm('¿Emitir/renovar el certificado SSL de {{ s.domain }}?');">
+									<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+									<button type="submit" class="btn btn-secondary btn-sm">{{ 'Renovar SSL' if s.ssl_enabled else 'Emitir SSL' }}</button>
+								</form>
+								<form method="post" action="/admin/proxy/{{ s.id }}/delete" style="display:inline;" onsubmit="return confirm('¿Eliminar el sitio {{ s.domain }} del proxy?');">
+									<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+									<button type="submit" class="btn btn-danger btn-sm">Eliminar</button>
+								</form>
+								{% else %}
+								<form method="post" action="/admin/proxy/{{ s.id }}/ssl" style="display:inline;" onsubmit="return confirm('¿Renovar el certificado SSL de {{ s.domain }}?');">
+									<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+									<button type="submit" class="btn btn-secondary btn-sm">Renovar SSL</button>
+								</form>
+								{% endif %}
+							</td>
+						</tr>
+						{% endfor %}
+					</tbody>
+				</table>
+			</div>
+			{% else %}
+			<p class="empty-state">Aún no hay sitios configurados.</p>
+			{% endif %}
+		</section>
+	</div>
 
-<form method="post" action="/admin/proxy/new" style="max-width:520px;">
-	<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-	<div class="field">
-		<label for="domain">Dominio</label>
-		<input type="text" id="domain" name="domain" required placeholder="midominio.com"/>
+	<div class="sidebar-col">
+		{% if proxy_service %}
+		<section class="detail-section">
+			<h2 class="detail-section-title">Proxy</h2>
+			<div class="admin-service-head" style="margin-bottom:8px;">
+				<span style="font-size:13.5px; color:var(--text-muted);">{{ proxy_service.label }}</span>
+				<span class="status-pill {{ 'running' if proxy_service.running else 'stopped' }}">
+					{% if proxy_service.running %}En marcha{% elif proxy_service.state == 'missing' %}No encontrado{% else %}Detenido{% endif %}
+				</span>
+			</div>
+			<p style="margin:0 0 4px;"><strong>Contenedores:</strong> {% for c in proxy_service.containers %}<code>{{ c }}</code>{% if not loop.last %} {% endif %}{% endfor %}</p>
+			{% if proxy_service.error %}<p class="admin-service-error"><strong>Aviso:</strong> {{ proxy_service.error }}</p>{% endif %}
+			<div class="admin-actions">
+				{% if proxy_service.running %}
+				<form method="post" action="/admin/containers/proxy/stop" onsubmit="return confirm('¿Detener el proxy? Todos los dominios dejarán de responder mientras esté apagado.');">
+					<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+					<button type="submit" class="btn btn-danger btn-sm">Detener proxy</button>
+				</form>
+				{% else %}
+				<form method="post" action="/admin/containers/proxy/start">
+					<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+					<button type="submit" class="btn btn-primary btn-sm">Iniciar proxy</button>
+				</form>
+				{% endif %}
+			</div>
+		</section>
+		{% endif %}
+
+		<section class="detail-section">
+			<h2 class="detail-section-title">Nuevo sitio</h2>
+			<p class="detail-section-hint">Para publicar un proyecto completo (tarjeta del portal + dominio) usa mejor <a href="/admin/projects/new">Nuevo proyecto</a>. Esto solo agrega el enrutamiento de un dominio suelto.</p>
+			<form method="post" action="/admin/proxy/new">
+				<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+				<div class="field">
+					<label for="domain">Dominio</label>
+					<input type="text" id="domain" name="domain" required placeholder="midominio.com"/>
+				</div>
+				<div class="field">
+					<label for="project_select">Destino</label>
+					<select id="project_select" onchange="const [h,p]=this.value.split('|'); if(h){document.getElementById('target_host').value=h; document.getElementById('target_port').value=p;}">
+						<option value="">— Elegir un proyecto ya registrado —</option>
+						{% for p in port_projects %}
+						<option value="host.docker.internal|{{ p.port }}">{{ p.name }} (puerto {{ p.port }})</option>
+						{% endfor %}
+						<option value="custom">Otro / personalizado…</option>
+					</select>
+				</div>
+				<div id="manual-target-fields">
+					<div class="field">
+						<label for="target_host">Destino (host)</label>
+						<input type="text" id="target_host" name="target_host" value="host.docker.internal" required/>
+					</div>
+					<div class="field">
+						<label for="target_port">Destino (puerto)</label>
+						<input type="number" id="target_port" name="target_port" min="1" max="65535" required/>
+					</div>
+				</div>
+				<button type="submit" class="btn btn-primary btn-sm">Crear sitio</button>
+			</form>
+		</section>
 	</div>
-	<div class="field">
-		<label for="project_select">Destino</label>
-		<select id="project_select" onchange="const [h,p]=this.value.split('|'); if(h){document.getElementById('target_host').value=h; document.getElementById('target_port').value=p;}">
-			<option value="">— Elegir un proyecto ya registrado —</option>
-			{% for p in port_projects %}
-			<option value="host.docker.internal|{{ p.port }}">{{ p.name }} (puerto {{ p.port }})</option>
-			{% endfor %}
-			<option value="custom">Otro / personalizado…</option>
-		</select>
-	</div>
-	<div class="form-row" id="manual-target-fields">
-		<div class="field">
-			<label for="target_host">Destino (host)</label>
-			<input type="text" id="target_host" name="target_host" value="host.docker.internal" required/>
-		</div>
-		<div class="field">
-			<label for="target_port">Destino (puerto)</label>
-			<input type="number" id="target_port" name="target_port" min="1" max="65535" required/>
-		</div>
-	</div>
-	<button type="submit" class="btn btn-primary">Crear sitio</button>
-</form>
+</div>
 
 {% endblock %}
 
@@ -125,7 +184,7 @@
 	const select = document.getElementById('project_select');
 	const manual = document.getElementById('manual-target-fields');
 	function sync() {
-		manual.style.display = (select.value === '' || select.value === 'custom') ? 'grid' : 'none';
+		manual.style.display = (select.value === '' || select.value === 'custom') ? '' : 'none';
 	}
 	select.addEventListener('change', sync);
 	sync();

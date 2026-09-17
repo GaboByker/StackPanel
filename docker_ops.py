@@ -94,8 +94,8 @@ def remove_container(name, force=True):
     request('DELETE', f'/containers/{name}?force={"true" if force else "false"}')
 
 
-def create_container(name, image, env=None, ports=None, binds=None, network=None, cmd=None,
-                      working_dir=None, restart='unless-stopped'):
+def create_container(name, image, env=None, ports=None, binds=None, network=None, network_aliases=None,
+                      cmd=None, working_dir=None, restart='unless-stopped'):
     """ports: {'80/tcp': host_port}. binds: ['/host/path:/container/path']."""
     exposed = {}
     port_bindings = {}
@@ -122,7 +122,10 @@ def create_container(name, image, env=None, ports=None, binds=None, network=None
     if working_dir:
         payload['WorkingDir'] = working_dir
     if network:
-        payload['NetworkingConfig'] = {'EndpointsConfig': {network: {}}}
+        endpoint = {}
+        if network_aliases:
+            endpoint['Aliases'] = network_aliases
+        payload['NetworkingConfig'] = {'EndpointsConfig': {network: endpoint}}
 
     remove_container(name)
     status, raw = request('POST', f'/containers/create?name={name}', body=payload, timeout=60)

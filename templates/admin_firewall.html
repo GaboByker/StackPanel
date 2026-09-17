@@ -41,7 +41,7 @@
 </div>
 
 <h2 class="landing-section-title" style="margin-top:28px;">Rango para apps de 1 clic (20000-20999)</h2>
-<p class="admin-hint">Cada vez que instalas una app con "⚡ Instalar app" se le asigna un puerto libre de este rango. Como esos contenedores publican el puerto igual que los demás, <strong>ya son accesibles desde internet en cuanto se crean</strong> — no necesitas abrir nada en ufw para eso. El comando de abajo solo tendría efecto si algún día corres algo en ese rango fuera de Docker.</p>
+<p class="admin-hint">Cada vez que instalas una app con "Instalar app" se le asigna un puerto libre de este rango. Como esos contenedores publican el puerto igual que los demás, <strong>ya son accesibles desde internet en cuanto se crean</strong> — no necesitas abrir nada en ufw para eso. El comando de abajo solo tendría efecto si algún día corres algo en ese rango fuera de Docker.</p>
 <p><code class="fw-cmd" id="cmd-range">sudo ufw allow 20000:20999/tcp</code>
 	<button type="button" class="btn btn-secondary btn-sm fw-copy" data-target="cmd-range">Copiar</button>
 </p>
@@ -76,7 +76,7 @@
 			const text = el.textContent;
 			navigator.clipboard.writeText(text).then(function () {
 				const original = btn.textContent;
-				btn.textContent = 'Copiado ✓';
+				btn.textContent = 'Copiado';
 				setTimeout(function () { btn.textContent = original; }, 1500);
 			}).catch(function () {
 				window.prompt('Copia manualmente:', text);

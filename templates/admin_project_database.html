@@ -1,14 +1,15 @@
 {% extends "base_admin.html" %}
+{% from '_icons.html' import icon_chevron_left, icon_search %}
 {% block title %}Bases de datos · {{ project.name }}{% endblock %}
 {% block heading %}Bases de datos — {{ project.name }}{% endblock %}
 {% block topbar_actions %}
-<a class="btn btn-secondary btn-sm" href="/admin/projects/{{ project.id }}">← {{ project.name }}</a>
+<a class="btn btn-secondary btn-sm" href="/admin/projects/{{ project.id }}">{{ icon_chevron_left(cls='icon icon-sm') }} {{ project.name }}</a>
 {% endblock %}
 {% block content %}
 
 <form method="post" action="/admin/projects/{{ project.id }}/database/autodetect" style="margin-bottom:20px;">
 	<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-	<button type="submit" class="btn btn-primary">🔍 Auto-detectar desde el .env del proyecto</button>
+	<button type="submit" class="btn btn-primary">{{ icon_search(cls='icon icon-sm') }} Auto-detectar desde el .env del proyecto</button>
 	<span class="admin-hint" style="margin-left:8px;">Lee las credenciales del <code>.env</code> y prueba varias formas de conectar hasta encontrar la que funciona.</span>
 </form>
 

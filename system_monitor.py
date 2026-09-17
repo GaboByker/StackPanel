@@ -4,13 +4,36 @@ import shutil
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from docker_control import MANAGED_SERVICES, _container_states, _docker_request, _resolve_service_containers
+import panel_db
 
 # Ruta desde la que se mide el almacenamiento del host. El contenedor del portal
 # monta el home del host (solo lectura) en /stack; fuera de Docker, se usa '/'.
 _DISK_PATH = '/stack' if os.path.isdir('/stack') else '/'
 
-PROJECT_LABELS = {key: meta['label'] for key, meta in MANAGED_SERVICES.items()}
-PROJECT_LABELS['portal'] = 'Portal'
+PORTAL_ROOT = os.path.dirname(os.path.abspath(__file__))
+
+
+def _all_services(states):
+    """MANAGED_SERVICES (fijos, en código) + proyectos registrados en el panel
+    que tienen contenedores asociados. Así el monitor incluye cualquier
+    proyecto nuevo sin tener que tocar código cada vez que se agrega uno.
+    Si un proyecto de la base de datos comparte algún contenedor con un
+    servicio fijo (p.ej. quedó registrado dos veces), se descarta entero
+    para no contar esos contenedores dos veces ni mostrar una fila duplicada."""
+    managed_containers = set()
+    for meta in MANAGED_SERVICES.values():
+        managed_containers.update(_resolve_service_containers(meta, states))
+
+    services = dict(MANAGED_SERVICES)
+    for item in panel_db.list_projects_raw(PORTAL_ROOT):
+        containers = panel_db.project_containers(item)
+        if not containers or managed_containers.intersection(containers):
+            continue
+        key = f"project:{item['project_key']}"
+        if key in services:
+            continue
+        services[key] = {'label': item.get('name') or item['project_key'], 'containers': containers}
+    return services
 
 
 def _calc_cpu_percent(cpu_stats, precpu_stats):
@@ -115,14 +138,18 @@ def get_system_metrics():
         host, host_err = host_future.result()
         disk, disk_err = disk_future.result()
 
+    services = _all_services(states)
+    project_labels = {key: meta['label'] for key, meta in services.items()}
+    project_labels['portal'] = 'Portal'
+
     container_to_project = {}
-    for key, meta in MANAGED_SERVICES.items():
+    for key, meta in services.items():
         for container in _resolve_service_containers(meta, states):
             container_to_project[container] = key
     container_to_project['portal'] = 'portal'
 
     projects = {}
-    for key, label in PROJECT_LABELS.items():
+    for key, label in project_labels.items():
         projects[key] = {
             'key': key,
             'label': label,
@@ -188,12 +215,12 @@ def get_system_metrics():
             entry['cpu_percent'] += stats['cpu_percent']
             entry['memory_bytes'] += stats['memory_bytes']
             entry['containers'].append(stats)
-            containers_detail.append({**stats, 'project': project_key, 'project_label': PROJECT_LABELS[project_key]})
+            containers_detail.append({**stats, 'project': project_key, 'project_label': project_labels[project_key]})
 
     project_list = []
     total_cpu = 0.0
     total_mem = 0
-    for key in PROJECT_LABELS:
+    for key in project_labels:
         entry = projects[key]
         if entry['total'] == 0 and key != 'portal':
             continue
