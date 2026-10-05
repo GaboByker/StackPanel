@@ -34,7 +34,7 @@
 		<h2 class="landing-section-title">Consulta SQL</h2>
 		<form method="post">
 			<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-			<textarea name="sql" rows="4" style="width:100%; font-family:var(--mono); font-size:13px; padding:10px; border:1px solid var(--border); border-radius:var(--radius-sm);" placeholder="SELECT * FROM ...">{{ sql }}</textarea>
+			<textarea name="sql" rows="4" class="input-code" placeholder="SELECT * FROM ...">{{ sql }}</textarea>
 			<div class="admin-actions">
 				<button type="submit" class="btn btn-primary btn-sm">Ejecutar</button>
 			</div>

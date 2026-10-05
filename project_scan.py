@@ -12,6 +12,17 @@ def _compose_project_name(dir_name):
     return re.sub(r'[^a-z0-9_-]', '', dir_name.lower())
 
 
+def match_containers(dir_name, containers):
+    """Contenedores que pertenecen a la carpeta html/<dir_name>: por el label
+    de proyecto de Compose o porque su nombre empieza con el de la carpeta."""
+    compose_project = _compose_project_name(dir_name)
+    return [
+        c for c in containers
+        if c['labels'].get('com.docker.compose.project') == compose_project
+        or c['name'].lower().startswith(dir_name.lower())
+    ]
+
+
 def scan_candidates(stack_root, registered_folders):
     html_root = os.path.join(stack_root, 'html')
     if not os.path.isdir(html_root):
@@ -29,12 +40,7 @@ def scan_candidates(stack_root, registered_folders):
         if folder in registered:
             continue
 
-        compose_project = _compose_project_name(dir_name)
-        matched = [
-            c for c in containers
-            if c['labels'].get('com.docker.compose.project') == compose_project
-            or c['name'].lower().startswith(dir_name.lower())
-        ]
+        matched = match_containers(dir_name, containers)
         container_names = sorted({c['name'] for c in matched})
         ports = sorted({p for c in matched for p in c['host_ports']})
         running = any(c['state'] == 'running' for c in matched)

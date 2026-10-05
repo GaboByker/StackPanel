@@ -1,0 +1,645 @@
+{% extends "base_admin.html" %}
+{% block title %}Seguridad{% endblock %}
+{% block heading %}Seguridad{% endblock %}
+{% block topbar_actions %}
+<a class="btn btn-secondary btn-sm" href="/admin/audit">Auditoría</a>
+<a class="btn btn-secondary btn-sm" href="/admin/2fa">Mi verificación en dos pasos</a>
+{% endblock %}
+{% block content %}
+
+{% macro fmt(ts) %}{{ ts[:19].replace('T', ' ') if ts else '—' }}{% endmacro %}
+{% macro source_label(src) %}{{ {'auto': 'Automático', 'manual': 'Manual'}.get(src, src) }}{% endmacro %}
+
+<p class="admin-hint">
+	Protección del acceso al panel: cada intento de login y de código 2FA queda registrado, y una IP que acumula demasiados fallos se bloquea sola.
+	Las horas se muestran en UTC. Cada bloqueo se aplica también en el firewall del servidor: la IP queda cortada en <strong>todos los puertos</strong> (SSH, SFTP, webs y proyectos en Docker), no solo en el panel.
+</p>
+
+{% if not my_ip_allowlisted %}
+<article class="admin-service-card" style="margin-bottom:20px; border-color: var(--warn-border); background: var(--warn-bg);">
+	<p style="margin:0 0 10px;"><strong>Tu IP actual ({{ my_ip }}) no está en la lista blanca.</strong> Agrégala para que nunca te bloquee el sistema, aunque te equivoques de contraseña varias veces.</p>
+	<form method="post" action="/admin/security/allow" style="display:inline;">
+		<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+		<input type="hidden" name="ip" value="{{ my_ip }}"/>
+		<input type="hidden" name="note" value="IP del administrador"/>
+		<button type="submit" class="btn btn-primary btn-sm">Agregar mi IP a la lista blanca</button>
+	</form>
+</article>
+{% endif %}
+
+
+{# ------------------------------------------------------------------ #}
+<article class="admin-service-card" id="firewall" style="margin-bottom:20px;">
+	<div class="admin-service-head" style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+		<h3 style="margin:0;">Firewall del servidor</h3>
+		{% if guard and guard.disabled %}
+		<span class="status-pill pending">Desactivado (emergencia)</span>
+		{% elif guard and guard.table_present and not guard.last_error %}
+		<span class="status-pill running">Activo</span>
+		{% elif guard %}
+		<span class="status-pill pending">Con errores</span>
+		{% else %}
+		<span class="status-pill stopped">Agente no disponible</span>
+		{% endif %}
+	</div>
+	{% if guard %}
+		{% set k = guard.kernel or {} %}
+		<div class="stats-grid" style="margin-top:12px;">
+			<div class="stat-tile"><div class="stat-tile-value">{{ (k.ban4 or 0) + (k.ban6 or 0) }}</div><div class="stat-tile-label">Bloqueos en el kernel</div></div>
+			<div class="stat-tile"><div class="stat-tile-value">{{ (k.allow4 or 0) + (k.allow6 or 0) }}</div><div class="stat-tile-label">Rangos permitidos</div></div>
+			<div class="stat-tile {{ 'accent-danger' if k.dropped_packets else '' }}"><div class="stat-tile-value">{{ '{:,}'.format(k.dropped_packets or 0) }}</div><div class="stat-tile-label">Paquetes descartados</div></div>
+		</div>
+		<p class="admin-hint" style="margin:0 0 8px;">Última revisión: {{ fmt(guard.last_sync) }} · último cambio aplicado: {{ fmt(guard.last_change) }}. El agente relee esta lista cada pocos segundos y, además, se le avisa al instante con cada cambio.</p>
+		{% if guard.last_error %}
+		<p class="admin-hint" style="color:var(--danger-text); margin:0 0 8px;"><strong>Error:</strong> {{ guard.last_error }}</p>
+		{% endif %}
+		{% if guard.disabled %}
+		<p class="admin-hint" style="margin:0 0 8px;">El interruptor de emergencia está activo, así que no se aplica ningún bloqueo en el servidor. Para reactivarlo, ejecuta por SSH: <code>sudo rm /etc/stackpanel-guard/disabled</code></p>
+		{% endif %}
+		{% if guard.static_allow %}
+		<p class="admin-hint" style="margin:0 0 8px;">Lista blanca de emergencia del servidor (solo se edita por SSH en <code>/etc/stackpanel-guard/allow.conf</code>):
+			{% for n in guard.static_allow %}<code>{{ n }}</code>{{ ', ' if not loop.last else '' }}{% endfor %}</p>
+		{% endif %}
+		{% if guard.skipped %}
+		<p class="admin-hint" style="margin:8px 0 4px;"><strong>Bloqueos que el servidor no aplica</strong> (siguen activos en el panel):</p>
+		<ul class="admin-hint" style="margin:0 0 8px;">
+			{% for sk in guard.skipped %}<li><code>{{ sk.cidr }}</code>: {{ sk.reason }}</li>{% endfor %}
+		</ul>
+		{% endif %}
+		<form method="post" action="/admin/security/guard/sync">
+			<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+			<button type="submit" class="btn btn-secondary btn-sm">Sincronizar ahora</button>
+		</form>
+	{% else %}
+		<p class="admin-hint" style="margin:10px 0 0;">El agente <code>stackpanel-guard</code> no responde ({{ guard_error }}). Los bloqueos solo se aplican al panel hasta que el agente esté en marcha. Para instalarlo, ejecuta por SSH en la carpeta del panel: <code>sudo ./guard/install-guard.sh</code></p>
+	{% endif %}
+</article>
+
+<div class="stats-grid">
+	<div class="stat-tile {{ 'accent-danger' if summary.active_bans else '' }}">
+		<div class="stat-tile-value">{{ summary.active_bans }}</div>
+		<div class="stat-tile-label">IPs bloqueadas ahora</div>
+	</div>
+	<div class="stat-tile {{ 'accent-danger' if summary.failed_24h else '' }}">
+		<div class="stat-tile-value">{{ summary.failed_24h }}</div>
+		<div class="stat-tile-label">Intentos fallidos (24 h)</div>
+	</div>
+	<div class="stat-tile accent-success">
+		<div class="stat-tile-value">{{ summary.ok_24h }}</div>
+		<div class="stat-tile-label">Accesos correctos (24 h)</div>
+	</div>
+	<div class="stat-tile">
+		<div class="stat-tile-value">{{ allowlist|length }}</div>
+		<div class="stat-tile-label">Entradas en lista blanca</div>
+	</div>
+</div>
+
+<style>
+.viz-root {
+	--series-1: #2a78d6; --series-2: #eb6834; --series-3: #1baf7a; --series-4: #eda100;
+}
+@media (prefers-color-scheme: dark) {
+	:root:where(:not([data-theme="light"])) .viz-root {
+		--series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --series-4: #c98500;
+	}
+}
+:root[data-theme="dark"] .viz-root {
+	--series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --series-4: #c98500;
+}
+.viz-root .s1 { fill: var(--series-1); } .viz-root .s2 { fill: var(--series-2); }
+.viz-root .s3 { fill: var(--series-3); } .viz-root .s4 { fill: var(--series-4); }
+.viz-legend { display:flex; flex-wrap:wrap; gap:6px 16px; margin:0 0 8px; font-size:var(--fs-xs); color:var(--text); }
+.viz-legend span { display:inline-flex; align-items:center; gap:6px; }
+.viz-swatch { width:10px; height:10px; border-radius:3px; display:inline-block; }
+.viz-legend .viz-total { color:var(--text-muted); }
+.viz-plot { position:relative; }
+.viz-plot svg { display:block; width:100%; height:auto; }
+.viz-axis { fill:var(--text-muted); font-size:11px; font-family:var(--font-mono); }
+.viz-grid { stroke:var(--border); stroke-width:1; }
+.viz-hit { fill:transparent; cursor:default; }
+.viz-hit:hover, .viz-hit.is-active { fill:var(--text); fill-opacity:0.05; }
+.viz-tip { position:absolute; pointer-events:none; background:var(--surface); color:var(--text); border:1px solid var(--border);
+	border-radius:8px; padding:8px 10px; font-size:var(--fs-xs); box-shadow:var(--card-shadow); min-width:140px; display:none; z-index:2; }
+.viz-tip .row { display:flex; align-items:center; gap:6px; justify-content:space-between; }
+.viz-tip .row b { font-variant-numeric:tabular-nums; }
+</style>
+
+<article class="admin-service-card viz-root" id="grafico" style="margin-bottom:16px;">
+	<div class="admin-service-head"><h3 style="margin:0;">Intentos fallidos por hora (últimas 24 h, UTC)</h3></div>
+	<div class="viz-legend" aria-hidden="true">
+		{% for key, label in chart.series %}
+		<span><i class="viz-swatch" style="background:var(--series-{{ loop.index }});"></i>{{ label }} <span class="viz-total">{{ '{:,}'.format(chart.totals[key]) }}</span></span>
+		{% endfor %}
+	</div>
+	<div class="viz-plot" id="viz-plot">
+		<svg viewBox="0 0 {{ chart.width }} {{ chart.height }}" role="img" aria-label="Intentos fallidos por hora y servicio en las últimas 24 horas: {{ chart.grand_total }} en total. La tabla con los datos está debajo.">
+			{% for t in chart.ticks %}
+			<line class="viz-grid" x1="{{ chart.pad_l }}" x2="{{ chart.width - chart.pad_r }}" y1="{{ '%.1f'|format(t.y) }}" y2="{{ '%.1f'|format(t.y) }}"/>
+			<text class="viz-axis" x="{{ chart.pad_l - 6 }}" y="{{ '%.1f'|format(t.y + 4) }}" text-anchor="end">{{ '{:,}'.format(t.value) }}</text>
+			{% endfor %}
+			{% for b in chart.buckets %}
+				{% for seg in b.segments %}
+					{% if seg.path %}<path class="s{{ seg.series }}" d="{{ seg.path }}"/>{% else %}<rect class="s{{ seg.series }}" x="{{ '%.1f'|format(seg.x) }}" y="{{ '%.1f'|format(seg.y) }}" width="{{ '%.1f'|format(seg.w) }}" height="{{ '%.1f'|format(seg.h) }}"/>{% endif %}
+				{% endfor %}
+				{% if loop.index0 % 3 == 0 %}
+				<text class="viz-axis" x="{{ '%.1f'|format(b.x + chart.bar_w / 2) }}" y="{{ chart.height - 6 }}" text-anchor="middle">{{ b.label[:2] }}h</text>
+				{% endif %}
+				<rect class="viz-hit" data-i="{{ loop.index0 }}" x="{{ '%.1f'|format(b.slot_x) }}" y="0" width="{{ '%.1f'|format(b.slot_w) }}" height="{{ chart.base_y }}"/>
+			{% endfor %}
+		</svg>
+		<div class="viz-tip" id="viz-tip" role="status"></div>
+	</div>
+	<details style="margin-top:8px;">
+		<summary class="admin-hint" style="cursor:pointer;">Ver los datos en tabla</summary>
+		<div class="admin-table-wrap" style="margin-top:8px;">
+			<table class="admin-table">
+				<thead><tr><th>Hora (UTC)</th>{% for key, label in chart.series %}<th>{{ label }}</th>{% endfor %}<th>Total</th></tr></thead>
+				<tbody>
+					{% for b in chart.buckets|reverse %}
+					<tr><td>{{ b.day }} {{ b.label }}</td>{% for key, label in chart.series %}<td>{{ b.counts[key] }}</td>{% endfor %}<td><strong>{{ b.total }}</strong></td></tr>
+					{% endfor %}
+				</tbody>
+			</table>
+		</div>
+	</details>
+	<script type="application/json" id="viz-data">{{ {'series': chart.series, 'buckets': chart.buckets|map(attribute='counts')|list, 'labels': chart.buckets|map(attribute='label')|list, 'days': chart.buckets|map(attribute='day')|list}|tojson }}</script>
+</article>
+
+{% if summary.top_ips %}
+<p class="admin-hint">IPs con más fallos en 24 h:
+	{% for t in summary.top_ips %}<code>{{ t.ip }}</code> ({{ t.n }}){{ ', ' if not loop.last else '' }}{% endfor %}
+</p>
+{% endif %}
+
+{# ------------------------------------------------------------------ #}
+<h2 class="landing-section-title" id="bloqueos" style="margin-top:28px;">IPs bloqueadas</h2>
+
+{# Macros genéricas para las tablas con buscador/orden/paginado. "p" es el
+   prefijo de la tabla en la URL (b = bloqueos, h = historial, e = intentos). #}
+{% macro turl(over={}, anchor='') -%}
+{%- set params = dict(table_params) -%}{%- for k, v in over.items() -%}{%- if v -%}{%- set _ = params.update({k: v}) -%}{%- else -%}{%- set _ = params.pop(k, None) -%}{%- endif -%}{%- endfor -%}
+{{ url_for('admin_security', **params) }}{{ '#' ~ anchor if anchor else '' }}
+{%- endmacro %}
+
+{% macro sort_th(t, p, anchor, field, label, asc_first=False) -%}
+{%- set active = t.sort == field -%}
+{%- set next_dir = ('asc' if t.direction == 'desc' else 'desc') if active else ('asc' if asc_first else 'desc') -%}
+<th aria-sort="{{ ('ascending' if t.direction == 'asc' else 'descending') if active else 'none' }}">
+	<a href="{{ turl({p ~ 'sort': field, p ~ 'dir': next_dir, p ~ 'page': None}, anchor) }}" class="ban-sort{{ ' is-active' if active else '' }}" title="Ordenar por {{ label|lower }}">{{ label }}<span class="ban-sort-icon" aria-hidden="true">{% if active %}{{ '▲' if t.direction == 'asc' else '▼' }}{% else %}↕{% endif %}</span></a>
+</th>
+{%- endmacro %}
+
+{% macro hidden_params(skip) -%}
+{%- for k, v in table_params.items() if k not in skip %}<input type="hidden" name="{{ k }}" value="{{ v }}"/>{% endfor -%}
+{%- endmacro %}
+
+{% macro search_box(t, p, anchor, placeholder, label) -%}
+<form method="get" action="/admin/security#{{ anchor }}" class="ban-search" role="search">
+	{{ hidden_params([p ~ 'q', p ~ 'page']) }}
+	<input type="search" name="{{ p }}q" value="{{ t.q }}" placeholder="{{ placeholder }}" aria-label="{{ label }}" maxlength="100"/>
+	<button type="submit" class="btn btn-secondary btn-sm">Buscar</button>
+	{% if t.q %}<a class="btn btn-secondary btn-sm" href="{{ turl({p ~ 'q': None, p ~ 'page': None}, anchor) }}">Limpiar</a>{% endif %}
+</form>
+{%- endmacro %}
+
+{% macro pager(t, p, anchor, label) -%}
+{% if t.total %}
+<nav class="ban-pager" aria-label="Paginado de {{ label }}">
+	<span class="admin-hint" style="margin:0;">Mostrando {{ '{:,}'.format(t.first) }}–{{ '{:,}'.format(t.last) }} de {{ '{:,}'.format(t.total) }}</span>
+	<div class="ban-pages">
+		{% if t.page > 1 %}<a href="{{ turl({p ~ 'page': t.page - 1}, anchor) }}" aria-label="Página anterior">‹ Anterior</a>{% else %}<span class="is-disabled">‹ Anterior</span>{% endif %}
+		{% set window = [1, t.page - 2, t.page - 1, t.page, t.page + 1, t.page + 2, t.pages] | unique | select('>=', 1) | select('<=', t.pages) | sort | list %}
+		{% for n in window %}
+			{% if not loop.first and n - window[loop.index0 - 1] > 1 %}<span aria-hidden="true">…</span>{% endif %}
+			{% if n == t.page %}<span class="is-current" aria-current="page">{{ n }}</span>{% else %}<a href="{{ turl({p ~ 'page': n if n > 1 else None}, anchor) }}">{{ n }}</a>{% endif %}
+		{% endfor %}
+		{% if t.page < t.pages %}<a href="{{ turl({p ~ 'page': t.page + 1}, anchor) }}" aria-label="Página siguiente">Siguiente ›</a>{% else %}<span class="is-disabled">Siguiente ›</span>{% endif %}
+	</div>
+	<form method="get" action="/admin/security#{{ anchor }}" style="display:flex; gap:6px; align-items:center;">
+		{{ hidden_params([p ~ 'per', p ~ 'page']) }}
+		<label for="{{ p }}per" class="admin-hint" style="margin:0;">Por página</label>
+		<select id="{{ p }}per" name="{{ p }}per" onchange="this.form.submit()">
+			{% for n in [25, 50, 100] %}<option value="{{ n }}" {{ 'selected' if t.per_page == n else '' }}>{{ n }}</option>{% endfor %}
+		</select>
+		<noscript><button type="submit" class="btn btn-secondary btn-sm">Aplicar</button></noscript>
+	</form>
+</nav>
+{% endif %}
+{%- endmacro %}
+
+{% macro hl(text, q) -%}
+{%- if q and text and q|lower in text|lower -%}
+{%- set i = (text|lower).find(q|lower) -%}{{ text[:i] }}<mark class="ban-hit">{{ text[i:i + q|length] }}</mark>{{ text[i + q|length:] }}
+{%- else -%}{{ text }}{%- endif -%}
+{%- endmacro %}
+
+{% macro count_hint(t, noun_one, noun_many) -%}
+<span class="admin-hint" style="margin:0;">
+	{%- if t.q %}{{ '{:,}'.format(t.total) }} de {{ '{:,}'.format(t.total_all) }} coinciden con «{{ t.q }}»{% else %}{{ '{:,}'.format(t.total) }} {{ noun_one if t.total == 1 else noun_many }}{% endif -%}
+</span>
+{%- endmacro %}
+
+<style>
+.ban-toolbar { display:flex; flex-wrap:wrap; gap:8px 12px; align-items:center; justify-content:space-between; margin:0 0 10px; }
+.ban-search { display:flex; gap:8px; align-items:center; flex:1 1 320px; max-width:520px; }
+.ban-search input[type="search"] { flex:1; min-width:0; }
+.ban-sort { color:inherit; text-decoration:none; display:inline-flex; align-items:center; gap:4px; white-space:nowrap; }
+.ban-sort:hover { color:var(--accent); }
+.ban-sort-icon { font-size:10px; color:var(--text-faint, var(--text-muted)); }
+.ban-sort.is-active .ban-sort-icon { color:var(--accent); }
+.ban-pager { display:flex; flex-wrap:wrap; gap:6px; align-items:center; justify-content:space-between; margin-top:10px; }
+.ban-pages { display:flex; flex-wrap:wrap; gap:4px; }
+.ban-pages a, .ban-pages span { min-width:32px; text-align:center; padding:4px 8px; border:1px solid var(--border); border-radius:6px; font-size:var(--fs-xs); text-decoration:none; color:var(--text); }
+.ban-pages a:hover { border-color:var(--accent); color:var(--accent); }
+.ban-pages .is-current { background:var(--accent); border-color:var(--accent); color:#fff; font-weight:600; }
+.ban-pages .is-disabled { opacity:.4; }
+mark.ban-hit { background:var(--warn-bg); color:inherit; border-radius:3px; padding:0 1px; }
+.sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
+</style>
+
+<div class="ban-toolbar">
+	{{ search_box(bans, 'b', 'bloqueos', 'Buscar IP, servicio, motivo, origen…', 'Buscar en IPs bloqueadas') }}
+	{{ count_hint(bans, 'bloqueo activo', 'bloqueos activos') }}
+</div>
+
+<div class="admin-table-wrap">
+	<table class="admin-table">
+		<thead><tr>
+			{{ sort_th(bans, 'b', 'bloqueos', 'cidr', 'IP / rango', True) }}
+			{{ sort_th(bans, 'b', 'bloqueos', 'service', 'Servicio', True) }}
+			{{ sort_th(bans, 'b', 'bloqueos', 'reason', 'Motivo', True) }}
+			{{ sort_th(bans, 'b', 'bloqueos', 'source', 'Origen', True) }}
+			{{ sort_th(bans, 'b', 'bloqueos', 'created_at', 'Desde') }}
+			{{ sort_th(bans, 'b', 'bloqueos', 'expires_at', 'Expira') }}
+			<th><span class="sr-only">Acciones</span></th>
+		</tr></thead>
+		<tbody>
+			{% for b in bans['items'] %}
+			<tr>
+				<td><code>{{ hl(b.cidr, bans.q) }}</code></td>
+				<td>{{ hl(service_labels.get(b.service, b.service), bans.q) }}</td>
+				<td>{{ hl(b.reason, bans.q) if b.reason else '—' }}</td>
+				<td><span class="status-pill {{ 'stopped' if b.source == 'auto' else 'custom' }}">{{ source_label(b.source) }}</span>{% if b.created_by %}<br/><small class="admin-hint">{{ hl(b.created_by, bans.q) }}</small>{% endif %}</td>
+				<td>{{ fmt(b.created_at) }}</td>
+				<td>{{ fmt(b.expires_at) if b.expires_at else 'Permanente' }}</td>
+				<td>
+					<form method="post" action="/admin/security/ban/{{ b.id }}/lift">
+						<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+						<input type="hidden" name="back" value="{{ turl({}, 'bloqueos') }}"/>
+						<button type="submit" class="btn btn-secondary btn-sm">Desbloquear</button>
+					</form>
+				</td>
+			</tr>
+			{% else %}
+			<tr><td colspan="7" class="htop-loading">{% if bans.q %}Ninguna IP bloqueada coincide con «{{ bans.q }}».{% else %}No hay IPs bloqueadas en este momento.{% endif %}</td></tr>
+			{% endfor %}
+		</tbody>
+	</table>
+</div>
+{{ pager(bans, 'b', 'bloqueos', 'IPs bloqueadas') }}
+
+<article class="admin-service-card" style="max-width:720px; margin-top:16px;">
+	<div class="admin-service-head"><h3>Bloquear una IP a mano</h3></div>
+	<form method="post" action="/admin/security/ban">
+		<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+		<div class="form-row">
+			<div class="field">
+				<label for="ban-ip">IP o rango (CIDR)</label>
+				<input type="text" id="ban-ip" name="ip" required placeholder="203.0.113.7 o 203.0.113.0/24"/>
+			</div>
+			<div class="field">
+				<label for="ban-duration">Duración</label>
+				<select id="ban-duration" name="duration">
+					{% for key, d in durations.items() %}
+					<option value="{{ key }}" {{ 'selected' if key == '1440' else '' }}>{{ d[0] }}</option>
+					{% endfor %}
+				</select>
+			</div>
+		</div>
+		<div class="field">
+			<label for="ban-reason">Motivo (opcional)</label>
+			<input type="text" id="ban-reason" name="reason" maxlength="300" placeholder="Escaneo de puertos, abuso..."/>
+		</div>
+		<button type="submit" class="btn btn-danger">Bloquear</button>
+		<p class="admin-hint" style="margin:10px 0 0;">No se puede bloquear un rango que incluya tu IP ni uno que se solape con la lista blanca.</p>
+	</form>
+</article>
+
+{# ------------------------------------------------------------------ #}
+<h2 class="landing-section-title" id="lista-blanca" style="margin-top:28px;">Lista blanca</h2>
+<p class="admin-hint">Estas IPs nunca se bloquean y pueden iniciar sesión aunque la cuenta esté siendo atacada desde otras IPs. Agrega aquí solo las IPs fijas en las que confías.</p>
+<div class="admin-table-wrap">
+	<table class="admin-table">
+		<thead><tr><th>IP / rango</th><th>Nota</th><th>Agregada</th><th>Por</th><th></th></tr></thead>
+		<tbody>
+			{% for a in allowlist %}
+			<tr>
+				<td><code>{{ a.cidr }}</code>{% if a.cidr.split('/')[0] == my_ip %} <span class="status-pill running">Tu IP</span>{% endif %}</td>
+				<td>{{ a.note or '—' }}</td>
+				<td>{{ fmt(a.created_at) }}</td>
+				<td>{{ a.created_by or '—' }}</td>
+				<td>
+					<form method="post" action="/admin/security/allow/{{ a.id }}/delete" onsubmit="return confirm('¿Quitar {{ a.cidr }} de la lista blanca?');">
+						<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+						<button type="submit" class="btn btn-danger btn-sm">Quitar</button>
+					</form>
+				</td>
+			</tr>
+			{% else %}
+			<tr><td colspan="5" class="htop-loading">La lista blanca está vacía.</td></tr>
+			{% endfor %}
+		</tbody>
+	</table>
+</div>
+
+<article class="admin-service-card" style="max-width:720px; margin-top:16px;">
+	<div class="admin-service-head"><h3>Agregar a la lista blanca</h3></div>
+	<form method="post" action="/admin/security/allow">
+		<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+		<div class="form-row">
+			<div class="field">
+				<label for="allow-ip">IP o rango (CIDR)</label>
+				<input type="text" id="allow-ip" name="ip" required value="{{ my_ip }}"/>
+			</div>
+			<div class="field">
+				<label for="allow-note">Nota</label>
+				<input type="text" id="allow-note" name="note" maxlength="200" placeholder="Casa, oficina..."/>
+			</div>
+		</div>
+		<button type="submit" class="btn btn-primary">Agregar</button>
+	</form>
+</article>
+
+{# ------------------------------------------------------------------ #}
+<h2 class="landing-section-title" id="deteccion" style="margin-top:28px;">Detección automática en el servidor</h2>
+<p class="admin-hint">
+	El agente del servidor lee estos logs en vivo y bloquea, en todos los puertos, a las IPs que superan el límite. Los números de las últimas 24 h vienen de la base del panel.
+	<strong>Solo observar</strong> registra los intentos y anota en Auditoría a quién se habría bloqueado, sin bloquearlo: sirve para probar una regla antes de activarla.
+	El panel tiene su propia regla, en "Reglas", más abajo.
+</p>
+<form method="post" action="/admin/security/jails">
+	<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+	<div class="admin-table-wrap">
+		<table class="admin-table">
+			<thead><tr><th>Servicio</th><th>Modo</th><th>Fallos</th><th>Ventana (min)</th><th>Bloqueo (min)</th><th>Últimas 24 h</th><th>Estado</th></tr></thead>
+			<tbody>
+				{% for name, j in jails.items() %}
+				{% set st = jail_stats.get(name, {}) %}
+				{% set live = guard.jails.get(name) if guard and guard.jails else None %}
+				<tr>
+					<td>
+						<strong>{{ j.label }}</strong><br/><small class="admin-hint">{{ j.source }}</small>
+						{% if j.container is defined %}
+						<div class="field" style="margin:6px 0 0;"><input type="text" name="{{ name }}_container" value="{{ j.container }}" aria-label="Contenedor" style="max-width:180px;" required/></div>
+						{% endif %}
+					</td>
+					<td>
+						<select name="{{ name }}_mode">
+							{% for key, label in jail_modes.items() %}<option value="{{ key }}" {{ 'selected' if j.mode == key else '' }}>{{ label }}</option>{% endfor %}
+						</select>
+					</td>
+					<td><input type="number" name="{{ name }}_max_failures" min="1" max="1000" value="{{ j.max_failures }}" style="max-width:80px;" required/></td>
+					<td><input type="number" name="{{ name }}_window_minutes" min="1" max="1440" value="{{ j.window_minutes }}" style="max-width:80px;" required/></td>
+					<td><input type="number" name="{{ name }}_ban_minutes" min="1" max="525600" value="{{ j.ban_minutes }}" style="max-width:100px;" required/></td>
+					<td><small>{{ st.failures or 0 }} fallos<br/>{{ st.bans or 0 }} bloqueos{% if st.observed %}<br/>{{ st.observed }} se habrían bloqueado{% endif %}</small></td>
+					<td>
+						{% if j.mode == 'off' %}
+						<span class="status-pill custom">Apagado</span>
+						{% elif not guard %}
+						<span class="status-pill stopped">Sin agente</span>
+						{% elif live and live.reader and live.reader.running and not live.reader.error %}
+						<span class="status-pill running">Leyendo</span>
+						{% elif live and live.reader %}
+						<span class="status-pill pending">Problema</span><br/><small class="admin-hint">{{ live.reader.error or 'arrancando…' }}</small>
+						{% else %}
+						<span class="status-pill pending">Pendiente</span>
+						{% endif %}
+					</td>
+				</tr>
+				{% endfor %}
+			</tbody>
+		</table>
+	</div>
+	<p class="admin-hint" style="margin:8px 0 12px;">Cada reincidencia de la misma IP en 30 días multiplica la duración del bloqueo según la tarjeta <a href="#reincidencia">Reincidencia</a>, sin pasar del máximo definido allí. Las IPs de la lista blanca nunca se cuentan.</p>
+	<button type="submit" class="btn btn-primary">Guardar detección</button>
+</form>
+
+{# ------------------------------------------------------------------ #}
+<h2 class="landing-section-title" id="reglas" style="margin-top:28px;">Reglas</h2>
+<form method="post" action="/admin/security/rules" style="max-width:720px;">
+	<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+	<article class="admin-service-card" style="margin-bottom:16px;">
+		<div class="admin-service-head"><h3>Bloqueo automático del login del panel</h3></div>
+		<div class="form-row">
+			<div class="field">
+				<label for="r-max">Fallos permitidos</label>
+				<input type="number" id="r-max" name="sec_max_failures" min="1" max="100" value="{{ rules.sec_max_failures }}" required/>
+			</div>
+			<div class="field">
+				<label for="r-window">En una ventana de (minutos)</label>
+				<input type="number" id="r-window" name="sec_window_minutes" min="1" max="1440" value="{{ rules.sec_window_minutes }}" required/>
+			</div>
+		</div>
+		<div class="field">
+			<label for="r-ban">Primer bloqueo (minutos)</label>
+			<input type="number" id="r-ban" name="sec_ban_minutes" min="1" max="525600" value="{{ rules.sec_ban_minutes }}" required/>
+		</div>
+		<p class="admin-hint" style="margin:0;">Solo para el login del panel. Las reglas de SSH, SFTP y Web están en <a href="#deteccion">Detección automática</a>.</p>
+	</article>
+
+	<article class="admin-service-card" id="reincidencia" style="margin-bottom:16px;">
+		<div class="admin-service-head"><h3>Reincidencia (todos los servicios)</h3></div>
+		<p class="admin-hint" style="margin:0 0 12px;">Se aplica a <strong>todos</strong> los bloqueos automáticos: panel, SSH, SFTP y Web. Si una IP vuelve a ser bloqueada dentro de 30 días, cada bloqueo nuevo dura lo que el anterior multiplicado por este valor, sin pasar del máximo. La duración de partida es la de cada servicio.</p>
+		<div class="form-row">
+			<div class="field">
+				<label for="r-mult">Multiplicador por reincidencia</label>
+				<input type="number" id="r-mult" name="sec_ban_multiplier" min="1" max="10" value="{{ rules.sec_ban_multiplier }}" required/>
+			</div>
+			<div class="field">
+				<label for="r-banmax">Bloqueo automático máximo (minutos)</label>
+				<input type="number" id="r-banmax" name="sec_ban_max_minutes" min="1" max="525600" value="{{ rules.sec_ban_max_minutes }}" required/>
+			</div>
+		</div>
+		<p class="admin-hint" style="margin:0 0 8px;">Multiplicador 1 = sin aumento (todas las veces dura lo mismo). Máximo actual: {{ rules.sec_ban_max_minutes }} min ({{ recidive_max }}).</p>
+		<div class="admin-table-wrap">
+			<table class="admin-table">
+				<thead><tr><th>Servicio</th><th>1.ª vez</th><th>2.ª</th><th>3.ª</th><th>4.ª</th><th>5.ª</th></tr></thead>
+				<tbody>
+					{% for r in recidive %}
+					<tr>
+						<td>{{ r.label }}{% if r.mode != 'ban' %}<br/><small class="admin-hint">{{ 'apagado' if r.mode == 'off' else 'solo observa: hoy no bloquea' }}</small>{% endif %}</td>
+						{% for step in r.steps %}<td>{% if r.reached and loop.index >= r.reached %}<strong>{{ step }}</strong>{% if loop.index == r.reached %} <small class="admin-hint">(máx.)</small>{% endif %}{% else %}{{ step }}{% endif %}</td>{% endfor %}
+					</tr>
+					{% endfor %}
+				</tbody>
+			</table>
+		</div>
+		<p class="admin-hint" style="margin:8px 0 0;">Ejemplo con los valores guardados. Si cambias los números, pulsa "Guardar reglas" para ver la tabla actualizada.</p>
+	</article>
+
+	<article class="admin-service-card" style="margin-bottom:16px;">
+		<div class="admin-service-head"><h3>Protección de cuentas</h3></div>
+		<div class="field">
+			<label for="r-acct">Fallos por cuenta (desde cualquier IP) antes de pausarla</label>
+			<input type="number" id="r-acct" name="sec_account_max_failures" min="1" max="1000" value="{{ rules.sec_account_max_failures }}" required/>
+		</div>
+		<p class="admin-hint" style="margin:0 0 12px;">Frena ataques distribuidos desde muchas IPs contra un mismo correo. Mientras la cuenta esté pausada solo se puede entrar desde una IP de la lista blanca.</p>
+		<label class="checkbox-row">
+			<input type="checkbox" name="sec_require_2fa" {{ 'checked' if rules.sec_require_2fa else '' }}/> Exigir verificación en dos pasos (2FA) a todos los administradores
+		</label>
+		<p class="admin-hint" style="margin:6px 0 0;">Quien no la tenga activa será llevado a configurarla antes de poder usar el panel.</p>
+	</article>
+
+	<article class="admin-service-card" style="margin-bottom:16px;" id="sesiones">
+		<div class="admin-service-head"><h3>Sesiones</h3></div>
+		<div class="form-row">
+			<div class="field">
+				<label for="r-sess">Duración máxima (horas)</label>
+				<input type="number" id="r-sess" name="sec_session_hours" min="1" max="168" value="{{ rules.sec_session_hours }}" required/>
+			</div>
+			<div class="field">
+				<label for="r-idle">Cierre por inactividad (minutos)</label>
+				<input type="number" id="r-idle" name="sec_idle_minutes" min="5" max="10080" value="{{ rules.sec_idle_minutes }}" required/>
+			</div>
+		</div>
+	</article>
+
+	<button type="submit" class="btn btn-primary">Guardar reglas</button>
+</form>
+
+<form method="post" action="/admin/security/sessions/revoke" style="margin-top:14px;" onsubmit="return confirm('Se cerrarán todas las sesiones abiertas de todos los administradores, excepto la tuya. ¿Continuar?');">
+	<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+	<button type="submit" class="btn btn-danger">Cerrar todas las sesiones (excepto la mía)</button>
+</form>
+
+{# ------------------------------------------------------------------ #}
+<h2 class="landing-section-title" id="intentos" style="margin-top:28px;">Últimos intentos de acceso</h2>
+<p class="admin-hint">
+	Servicio:
+	{% if not service_filter %}<strong>Todos</strong>{% else %}<a href="{{ turl({'service': None, 'epage': None}, 'intentos') }}">Todos</a>{% endif %}
+	{% for key, label in service_labels.items() %} · {% if service_filter == key %}<strong>{{ label }}</strong>{% else %}<a href="{{ turl({'service': key, 'epage': None}, 'intentos') }}">{{ label }}</a>{% endif %}{% endfor %}
+	&nbsp;&nbsp;|&nbsp;&nbsp; Resultado:
+	{% for key, label in [('', 'Todos'), ('fail', 'Fallidos'), ('ok', 'Correctos')] %}{{ ' · ' if not loop.first else '' }}{% if events.result == key %}<strong>{{ label }}</strong>{% else %}<a href="{{ turl({'eres': key, 'epage': None}, 'intentos') }}">{{ label }}</a>{% endif %}{% endfor %}
+</p>
+<div class="ban-toolbar">
+	{{ search_box(events, 'e', 'intentos', 'Buscar IP, usuario, detalle o servicio…', 'Buscar en intentos de acceso') }}
+	{{ count_hint(events, 'intento', 'intentos') }}
+</div>
+<div class="admin-table-wrap">
+	<table class="admin-table">
+		<thead><tr>
+			{{ sort_th(events, 'e', 'intentos', 'ts', 'Fecha') }}
+			{{ sort_th(events, 'e', 'intentos', 'service', 'Servicio', True) }}
+			{{ sort_th(events, 'e', 'intentos', 'ip', 'IP', True) }}
+			{{ sort_th(events, 'e', 'intentos', 'email', 'Usuario', True) }}
+			<th>Detalle</th>
+			{{ sort_th(events, 'e', 'intentos', 'success', 'Resultado', True) }}
+			<th><span class="sr-only">Acciones</span></th>
+		</tr></thead>
+		<tbody>
+			{% for e in events['items'] %}
+			<tr>
+				<td>{{ fmt(e.ts) }}</td>
+				<td>{{ hl(service_labels.get(e.service, e.service), events.q) }}</td>
+				<td><code>{{ hl(e.ip, events.q) }}</code></td>
+				<td>{{ hl(e.email, events.q) if e.email else '—' }}</td>
+				<td style="max-width:360px; overflow-wrap:anywhere;">{% if e.detail %}<small>{{ hl(e.detail, events.q) }}</small>{% elif e.kind == '2fa' %}Código 2FA{% else %}Contraseña{% endif %}</td>
+				<td><span class="status-pill {{ 'running' if e.success else 'stopped' }}">{{ 'Correcto' if e.success else 'Fallido' }}</span></td>
+				<td>
+					{% if not e.success and e.ip != my_ip %}
+					<form method="post" action="/admin/security/ban">
+						<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+						<input type="hidden" name="ip" value="{{ e.ip }}"/>
+						<input type="hidden" name="duration" value="1440"/>
+						<input type="hidden" name="reason" value="Bloqueo manual desde el registro de intentos"/>
+						<input type="hidden" name="back" value="{{ turl({}, 'intentos') }}"/>
+						<button type="submit" class="btn btn-secondary btn-sm">Bloquear 24 h</button>
+					</form>
+					{% endif %}
+				</td>
+			</tr>
+			{% else %}
+			<tr><td colspan="7" class="htop-loading">{% if events.q %}Ningún intento coincide con «{{ events.q }}».{% else %}No hay intentos registrados con estos filtros.{% endif %}</td></tr>
+			{% endfor %}
+		</tbody>
+	</table>
+</div>
+{{ pager(events, 'e', 'intentos', 'intentos de acceso') }}
+
+<h2 class="landing-section-title" id="historial" style="margin-top:28px;">Historial de bloqueos</h2>
+<p class="admin-hint">Bloqueos que ya terminaron, porque vencieron o porque alguien los quitó.</p>
+<div class="ban-toolbar">
+	{{ search_box(history, 'h', 'historial', 'Buscar IP, servicio, motivo, quién desbloqueó…', 'Buscar en el historial de bloqueos') }}
+	{{ count_hint(history, 'bloqueo terminado', 'bloqueos terminados') }}
+</div>
+<div class="admin-table-wrap">
+	<table class="admin-table">
+		<thead><tr>
+			{{ sort_th(history, 'h', 'historial', 'cidr', 'IP / rango', True) }}
+			{{ sort_th(history, 'h', 'historial', 'service', 'Servicio', True) }}
+			{{ sort_th(history, 'h', 'historial', 'reason', 'Motivo', True) }}
+			{{ sort_th(history, 'h', 'historial', 'source', 'Origen', True) }}
+			{{ sort_th(history, 'h', 'historial', 'created_at', 'Desde') }}
+			{{ sort_th(history, 'h', 'historial', 'ended_at', 'Terminó') }}
+		</tr></thead>
+		<tbody>
+			{% for b in history['items'] %}
+			<tr>
+				<td><code>{{ hl(b.cidr, history.q) }}</code></td>
+				<td>{{ hl(service_labels.get(b.service, b.service), history.q) }}</td>
+				<td>{{ hl(b.reason, history.q) if b.reason else '—' }}</td>
+				<td>{{ source_label(b.source) }}</td>
+				<td>{{ fmt(b.created_at) }}</td>
+				<td>{% if b.lifted_at %}Desbloqueada {{ fmt(b.lifted_at) }}{% if b.lifted_by %} por {{ hl(b.lifted_by, history.q) }}{% endif %}{% else %}Expiró {{ fmt(b.expires_at) }}{% endif %}</td>
+			</tr>
+			{% else %}
+			<tr><td colspan="6" class="htop-loading">{% if history.q %}Ningún bloqueo terminado coincide con «{{ history.q }}».{% else %}Todavía no hay bloqueos terminados.{% endif %}</td></tr>
+			{% endfor %}
+		</tbody>
+	</table>
+</div>
+{{ pager(history, 'h', 'historial', 'historial de bloqueos') }}
+
+<p class="admin-hint" style="margin-top:24px;">
+	IP detectada para esta sesión: <code>{{ my_ip }}</code>.
+	{% if trusted_proxies %}Proxies de confianza (X-Forwarded-For): <code>{{ trusted_proxies }}</code>.{% else %}Las cabeceras X-Forwarded-For se ignoran (no hay proxies de confianza declarados en <code>PORTAL_TRUSTED_PROXIES</code>), así que nadie puede falsificar su IP.{% endif %}
+</p>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+	var plot = document.getElementById('viz-plot');
+	var tip = document.getElementById('viz-tip');
+	var raw = document.getElementById('viz-data');
+	if (!plot || !tip || !raw) return;
+	var data = JSON.parse(raw.textContent);
+	var svg = plot.querySelector('svg');
+	function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]; }); }
+	function show(hit) {
+		var i = +hit.dataset.i, counts = data.buckets[i], total = 0;
+		var rows = data.series.map(function (s, k) {
+			total += counts[s[0]];
+			return '<div class="row"><span><i class="viz-swatch" style="background:var(--series-' + (k + 1) + ');"></i> ' + esc(s[1]) + '</span><b>' + counts[s[0]].toLocaleString() + '</b></div>';
+		});
+		tip.innerHTML = '<div style="margin-bottom:4px;"><strong>' + esc(data.days[i]) + ' ' + esc(data.labels[i]) + ' UTC</strong> · ' + total.toLocaleString() + '</div>' + rows.join('');
+		tip.style.display = 'block';
+		var box = plot.getBoundingClientRect(), r = hit.getBoundingClientRect();
+		var left = r.left - box.left + r.width / 2 - tip.offsetWidth / 2;
+		tip.style.left = Math.max(0, Math.min(left, box.width - tip.offsetWidth)) + 'px';
+		tip.style.top = '-8px';
+		svg.querySelectorAll('.viz-hit.is-active').forEach(function (el) { el.classList.remove('is-active'); });
+		hit.classList.add('is-active');
+	}
+	svg.querySelectorAll('.viz-hit').forEach(function (hit) {
+		hit.addEventListener('mouseenter', function () { show(hit); });
+		hit.addEventListener('click', function () { show(hit); });
+	});
+	svg.addEventListener('mouseleave', function () {
+		tip.style.display = 'none';
+		svg.querySelectorAll('.viz-hit.is-active').forEach(function (el) { el.classList.remove('is-active'); });
+	});
+})();
+</script>
+{% endblock %}

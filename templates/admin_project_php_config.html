@@ -1,0 +1,49 @@
+{% extends "base_admin.html" %}
+{% from '_icons.html' import icon_chevron_left %}
+{% block title %}Configuración PHP · {{ project.name }}{% endblock %}
+{% block heading %}Configuración PHP — {{ project.name }}{% endblock %}
+{% block topbar_actions %}
+<a class="btn btn-secondary btn-sm" href="/admin/projects/{{ project.id }}">{{ icon_chevron_left(cls='icon icon-sm') }} {{ project.name }}</a>
+{% endblock %}
+{% block content %}
+
+<p class="admin-hint" style="margin-bottom:20px;">
+	Ajustes comunes de PHP para este sitio (subida de archivos, memoria, tiempo de ejecución). Al guardar,
+	el contenedor de la app se reinicia para aplicarlos — el sitio queda un momento sin responder.
+</p>
+
+<form method="post" style="max-width:480px;" onsubmit="var b=this.querySelector('button[type=submit]'); if(b){ b.disabled=true; b.textContent='Guardando y reiniciando…'; }">
+	<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+
+	<div class="field">
+		<label for="upload_max_filesize">Tamaño máximo de archivo subido</label>
+		<input type="text" id="upload_max_filesize" name="upload_max_filesize" value="{{ values.upload_max_filesize }}" placeholder="64M"/>
+		<span class="admin-hint">Límite para subir imágenes, plugins, temas, etc. desde WordPress.</span>
+	</div>
+
+	<div class="field">
+		<label for="post_max_size">Tamaño máximo de datos por request (post_max_size)</label>
+		<input type="text" id="post_max_size" name="post_max_size" value="{{ values.post_max_size }}" placeholder="64M"/>
+		<span class="admin-hint">Debe ser igual o mayor al tamaño máximo de archivo subido.</span>
+	</div>
+
+	<div class="field">
+		<label for="memory_limit">Memoria máxima por proceso PHP</label>
+		<input type="text" id="memory_limit" name="memory_limit" value="{{ values.memory_limit }}" placeholder="256M"/>
+	</div>
+
+	<div class="field">
+		<label for="max_execution_time">Tiempo máximo de ejecución (segundos)</label>
+		<input type="number" id="max_execution_time" name="max_execution_time" value="{{ values.max_execution_time }}" placeholder="300"/>
+	</div>
+
+	<div class="field">
+		<label for="max_input_vars">Máximo de campos por formulario (max_input_vars)</label>
+		<input type="number" id="max_input_vars" name="max_input_vars" value="{{ values.max_input_vars }}" placeholder="3000"/>
+		<span class="admin-hint">Subilo si algún formulario/constructor de páginas se corta al guardar.</span>
+	</div>
+
+	<button type="submit" class="btn btn-primary">Guardar y reiniciar</button>
+</form>
+
+{% endblock %}

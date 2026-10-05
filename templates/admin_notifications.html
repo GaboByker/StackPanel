@@ -60,8 +60,11 @@
 		<label class="checkbox-row" style="margin-bottom:8px;">
 			<input type="checkbox" name="notify_disk_full" {{ 'checked' if cfg.notify_disk_full == '1' else '' }}/> Disco por encima del 90%
 		</label>
-		<label class="checkbox-row">
+		<label class="checkbox-row" style="margin-bottom:8px;">
 			<input type="checkbox" name="notify_ssl_expiring" {{ 'checked' if cfg.notify_ssl_expiring == '1' else '' }}/> Certificado SSL vence en menos de 14 días
+		</label>
+		<label class="checkbox-row">
+			<input type="checkbox" name="notify_security_ban" {{ 'checked' if cfg.notify_security_ban == '1' else '' }}/> Se bloquea una IP por intentos fallidos
 		</label>
 	</article>
 

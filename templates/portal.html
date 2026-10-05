@@ -10,13 +10,15 @@
 	<meta http-equiv="Pragma" content="no-cache"/>
 	<link rel="preconnect" href="https://fonts.googleapis.com"/>
 	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
-	<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"/>
+	<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap"/>
 	<link rel="stylesheet" href="/static/css/portal.css"/>
+	{% include '_theme_init.html' %}
 </head>
 <body class="landing-page">
 	<header class="landing-topbar">
 		<div class="landing-topbar-brand">Portal de proyectos</div>
 		<nav aria-label="Navegación principal">
+			<button type="button" class="theme-toggle-btn" id="theme-toggle-btn" aria-label="Cambiar tema"></button>
 			{% if current_admin %}
 			<span class="admin-user">{{ current_admin.email }}</span>
 			<a href="/admin">Panel</a>
@@ -31,7 +33,7 @@
 	</header>
 
 	<main class="landing-wrap">
-		<section class="landing-hero">
+		<section class="landing-hero landing-hero-copy">
 			<p class="landing-tagline">Bienvenido</p>
 			<h1>Elige un proyecto</h1>
 			<p>Cada aplicación es independiente: su propio servidor, cuentas y datos. Selecciona abajo a cuál quieres entrar.</p>
@@ -67,6 +69,28 @@
 		window.addEventListener('pageshow', function (event) {
 			if (event.persisted) { window.location.reload(); }
 		});
+
+		(function () {
+			var btn = document.getElementById('theme-toggle-btn');
+			var media = window.matchMedia('(prefers-color-scheme: dark)');
+
+			function current() {
+				return document.documentElement.getAttribute('data-theme') || (media.matches ? 'dark' : 'light');
+			}
+			function render() {
+				var dark = current() === 'dark';
+				btn.textContent = dark ? 'Tema claro' : 'Tema oscuro';
+				btn.setAttribute('aria-pressed', dark ? 'true' : 'false');
+			}
+			btn.addEventListener('click', function () {
+				var next = current() === 'dark' ? 'light' : 'dark';
+				document.documentElement.setAttribute('data-theme', next);
+				try { localStorage.setItem('panel-theme', next); } catch (e) {}
+				render();
+			});
+			media.addEventListener('change', render);
+			render();
+		})();
 	</script>
 </body>
 </html>

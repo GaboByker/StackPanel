@@ -7,10 +7,17 @@
 {% endblock %}
 {% block content %}
 
+{% if template_label %}
+<p class="admin-hint" style="margin-bottom:12px;">Tipo de app detectado: <strong>{{ template_label }}</strong> (instalada desde "Instalar app"). La auto-detección usa las credenciales que el panel guardó al instalarla.</p>
+{% endif %}
+
 <form method="post" action="/admin/projects/{{ project.id }}/database/autodetect" style="margin-bottom:20px;">
 	<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-	<button type="submit" class="btn btn-primary">{{ icon_search(cls='icon icon-sm') }} Auto-detectar desde el .env del proyecto</button>
-	<span class="admin-hint" style="margin-left:8px;">Lee las credenciales del <code>.env</code> y prueba varias formas de conectar hasta encontrar la que funciona.</span>
+	<button type="submit" class="btn btn-primary">{{ icon_search(cls='icon icon-sm') }} Auto-detectar conexión</button>
+	<span class="admin-hint" style="margin-left:8px;">
+		{% if template_label %}Prueba con las credenciales guardadas de {{ template_label }} y, si no, con el <code>.env</code> del proyecto.
+		{% else %}Lee las credenciales del <code>.env</code> y prueba varias formas de conectar hasta encontrar la que funciona.{% endif %}
+	</span>
 </form>
 
 <h2 class="landing-section-title">Conexiones existentes</h2>

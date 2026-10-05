@@ -4,3 +4,4 @@ flask-wtf>=1.2
 pyotp>=2.9
 pymysql>=1.1
 psycopg2-binary>=2.9
+segno>=1.6

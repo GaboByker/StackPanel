@@ -4,41 +4,7 @@ import re
 import sqlite3
 from datetime import datetime, timezone
 
-# project_key -> metadata de respaldo/control para los proyectos que ya
-# existían antes de que el panel llevara este registro. Se aplica una sola
-# vez (solo rellena columnas que sigan vacías), nunca pisa datos existentes.
-_KNOWN_PROJECT_META = {
-    'social-hub': {'folder': 'html/social-hub', 'containers': ['social-hub']},
-    'empires': {'folder': 'html/Empires-Allies', 'containers': ['empires-allies']},
-    'social-empires': {'folder': 'html/social-empires', 'containers': ['social-empires']},
-    'torres-arquitectura': {
-        'folder': 'html/torres-arquitectura',
-        'containers': ['torres-arquitectura', 'torres-db'],
-    },
-    'finanzas-personales': {'folder': 'html/finanzas-personales', 'containers': ['finanzas-personales']},
-    'wapicenter': {
-        'folder': 'html/WApiCenter',
-        'containers': [
-            'wapicenter-api', 'wapicenter-frontend', 'wapicenter-postgres',
-            'wapicenter-redis', 'wapicenter-worker-1', 'wapicenter-backup',
-        ],
-        'volumes': [
-            'wapicenter_postgres_data', 'wapicenter_redis_data', 'wapicenter_frontend_dist',
-            'wapicenter_avatar_uploads', 'wapicenter_postgres_backups',
-        ],
-    },
-    'gemma4-api-manager': {
-        'folder': 'html/gemma4-api-manager',
-        'containers': ['gemma4-api-manager', 'gemma4-ollama'],
-        'volumes': ['gemma4-api-manager_ollama_data'],
-    },
-    'wanqara-dashboard': {
-        'folder': 'html/wanqara-dashboard',
-        'containers': ['wanqara-dashboard-frontend-1', 'wanqara-dashboard-backend-1', 'wanqara-dashboard-db-1'],
-        'volumes': ['wanqara-dashboard_db_data', 'wanqara-dashboard_upload_data'],
-    },
-    'limpieza-contactos': {'folder': 'html/limpieza-contactos', 'containers': ['limpieza-contactos']},
-}
+import site_presets
 
 DOMAIN_RE = re.compile(
     r'^(?=.{1,253}$)(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,63}$'
@@ -49,34 +15,6 @@ KEY_RE = re.compile(r'^[a-z0-9][a-z0-9-]{0,63}$')
 # inserta tal cual dentro de un archivo .conf de nginx, así que no puede
 # llevar espacios, comillas, llaves ni saltos de línea.
 TARGET_HOST_RE = re.compile(r'^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,253}[A-Za-z0-9])?$')
-
-# Dominios y proyectos ya existentes antes de que el panel gestionara esto.
-# Se usan solo para poblar la base de datos la primera vez (no se vuelven a
-# tocar si las tablas ya tienen datos).
-_SEED_SITES = [
-    {
-        'domain': 'wapicenter.xfirepc.com',
-        'target_host': 'host.docker.internal',
-        'target_port': 8090,
-        'ssl_enabled': 1,
-        'managed': 0,
-        'notes': 'Config personalizado (app + /api). No se regenera desde el panel.',
-    },
-    {
-        'domain': 'pagina.torresarquitecturaec.com',
-        'target_host': 'torres',
-        'target_port': 80,
-        'ssl_enabled': 1,
-        'managed': 0,
-        'notes': 'Config personalizado (WordPress). No se regenera desde el panel.',
-    },
-]
-
-_SEED_PROJECT_OVERRIDES = {
-    'wapicenter': {'access_mode': 'domain', 'domain': 'wapicenter.xfirepc.com'},
-    'torres-arquitectura': {'access_mode': 'domain', 'domain': 'pagina.torresarquitecturaec.com'},
-    'limpieza-contactos': {'port': 5052},
-}
 
 
 def _db_path(root):
@@ -129,8 +67,9 @@ def init_db(root):
             '''
         )
         _migrate_projects_columns(conn)
+        # Datos propios de esta instalación, si existen (site_presets.py).
         _seed_sites(conn)
-        _seed_projects(conn, root)
+        _seed_projects(conn)
         _backfill_known_projects(conn)
 
         conn.execute(
@@ -214,7 +153,7 @@ def _migrate_projects_columns(conn):
 
 
 def _backfill_known_projects(conn):
-    for key, meta in _KNOWN_PROJECT_META.items():
+    for key, meta in site_presets.get('known_project_meta', {}).items():
         row = conn.execute(
             'SELECT id, folder, containers FROM projects WHERE project_key = ? COLLATE NOCASE', (key,)
         ).fetchone()
@@ -235,7 +174,7 @@ def _seed_sites(conn):
     count = conn.execute('SELECT COUNT(*) FROM sites').fetchone()[0]
     if count:
         return
-    for site in _SEED_SITES:
+    for site in site_presets.get('seed_sites', []):
         conn.execute(
             '''
             INSERT INTO sites (domain, target_host, target_port, ssl_enabled, managed, notes, created_at)
@@ -248,21 +187,14 @@ def _seed_sites(conn):
         )
 
 
-def _seed_projects(conn, root):
+def _seed_projects(conn):
     count = conn.execute('SELECT COUNT(*) FROM projects').fetchone()[0]
     if count:
         return
-    path = os.path.join(root, 'projects.json')
-    try:
-        with open(path, encoding='utf-8') as handle:
-            data = json.load(handle)
-    except (OSError, json.JSONDecodeError):
-        return
-    if not isinstance(data, list):
-        return
-    for i, item in enumerate(data):
+    overrides = site_presets.get('seed_project_overrides', {})
+    for i, item in enumerate(site_presets.get('projects', [])):
         key = item.get('id') or f'proyecto-{i}'
-        override = _SEED_PROJECT_OVERRIDES.get(key, {})
+        override = overrides.get(key, {})
         access_mode = override.get('access_mode', 'port')
         domain = override.get('domain')
         port = override.get('port', item.get('port'))
@@ -468,6 +400,11 @@ def delete_project(root, project_id):
 def set_desired_state(root, project_id, state):
     with _connect(root) as conn:
         conn.execute('UPDATE projects SET desired_state = ? WHERE id = ?', (state, project_id))
+
+
+def set_containers(root, project_id, containers):
+    with _connect(root) as conn:
+        conn.execute('UPDATE projects SET containers = ? WHERE id = ?', (json.dumps(list(containers)), project_id))
 
 
 def set_project_folder(root, project_id, folder):

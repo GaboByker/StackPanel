@@ -24,6 +24,7 @@ from flask import (
     url_for,
 )
 from flask_wtf import CSRFProtect
+from flask_wtf.csrf import CSRFError
 
 from auth import (
     authenticate,
@@ -33,12 +34,15 @@ from auth import (
     disable_totp,
     get_admin,
     get_admin_id,
+    get_session_epoch,
     get_totp_state,
     init_db,
     list_admins,
     login_admin,
     logout_admin,
+    revoke_sessions,
     set_totp_secret,
+    verify_totp,
 )
 from docker_control import (
     list_service_status,
@@ -51,6 +55,7 @@ from docker_control import (
     remove_volumes,
     container_logs,
     list_all_containers,
+    list_published_ports,
     probe_http_port,
     PROBE_HOST,
 )
@@ -68,11 +73,16 @@ import scheduler
 import docker_ops
 import sftp_control
 import project_git
+import firewall_rules
+import guard_client
+import security
+import site_presets
 import subprocess
 import pyotp
+import segno
 
 PORTAL_ROOT = os.path.dirname(os.path.abspath(__file__))
-PUBLIC_HOST = os.environ.get('PUBLIC_HOST', '161.97.162.177')
+PUBLIC_HOST = os.environ.get('PUBLIC_HOST', 'localhost')
 PORTAL_PORT = int(os.environ.get('PORTAL_PORT', '5005'))
 STACK_ROOT = os.environ.get(
     'STACK_ROOT',
@@ -82,7 +92,7 @@ PROXY_SITES_DIR = os.environ.get(
     'PROXY_SITES_DIR',
     '/app/proxy-sites' if os.path.isdir('/app/proxy-sites') else os.path.join(STACK_ROOT, 'proxy', 'sites'),
 )
-CERTBOT_EMAIL = os.environ.get('CERTBOT_EMAIL', 'darkblood1977@gmail.com')
+CERTBOT_EMAIL = os.environ.get('CERTBOT_EMAIL', '')
 HOST_STACK_ROOT = os.environ.get('HOST_STACK_ROOT', STACK_ROOT)
 BACKUPS_DIR = os.environ.get('BACKUPS_DIR', '/app/backups')
 
@@ -104,16 +114,28 @@ def _project_paths(key):
     host_folder = os.path.join(HOST_STACK_ROOT, 'html', key)
     return local_folder, host_folder
 
-GRAPHIFY_PROJECTS = {
-    'portal': 'portal',
-    'social-hub': 'html/social-hub',
-    'empires': 'html/Empires-Allies',
-    'social-empires': 'html/social-empires',
-    'finanzas-personales': 'html/finanzas-personales',
-    'wapicenter': 'html/WApiCenter',
-    'gemma4-api-manager': 'html/gemma4-api-manager',
-    'wanqara-dashboard': 'html/wanqara-dashboard',
-}
+
+def _ensure_project_folder(project):
+    """Crea html/<key> si el proyecto todavía no tiene carpeta propia y la
+    registra en la base de datos. Devuelve el project (dict) actualizado."""
+    if project.get('folder'):
+        return project
+    folder = f"html/{project['project_key']}"
+    html_root = files_control.html_root(STACK_ROOT)
+    target_dir = os.path.join(html_root, project['project_key'])
+    os.makedirs(target_dir, exist_ok=True)
+    try:
+        os.chown(target_dir, -1, os.stat(html_root).st_gid)
+    except OSError:
+        pass
+    os.chmod(target_dir, 0o775)
+    panel_db.set_project_folder(PORTAL_ROOT, project['id'], folder)
+    project['folder'] = folder
+    return project
+
+# Grafos de código disponibles: el del propio panel y los de los proyectos
+# de esta instalación (site_presets.py).
+GRAPHIFY_PROJECTS = {'portal': 'portal', **site_presets.get('graphify_projects', {})}
 _GRAPHIFY_FILES = frozenset({
     'graph.html',
     'graph.json',
@@ -129,15 +151,32 @@ app = Flask(
     static_folder=os.path.join(PORTAL_ROOT, 'static'),
 )
 app.config['SECRET_KEY'] = os.environ.get('PORTAL_SECRET_KEY', 'portal-dev-change-me')
-app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=30)
+# Techo del cookie; la vida real de la sesión (horas máximas e inactividad)
+# la decide security.get_rules() en _validate_admin_session.
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=7)
 app.config['SESSION_REFRESH_EACH_REQUEST'] = False
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+# Activar (PORTAL_COOKIE_SECURE=1) cuando el panel se sirva por HTTPS.
+app.config['SESSION_COOKIE_SECURE'] = os.environ.get('PORTAL_COOKIE_SECURE') == '1'
 app.config['MAX_CONTENT_LENGTH'] = int(os.environ.get('PORTAL_MAX_UPLOAD_MB', '512')) * 1024 * 1024
 csrf = CSRFProtect(app)
 
 init_db(PORTAL_ROOT)
 panel_db.init_db(PORTAL_ROOT)
+security.init_db(PORTAL_ROOT)
+security.ensure_jail_defaults(PORTAL_ROOT)
 os.makedirs(BACKUPS_DIR, exist_ok=True)
 scheduler.start(PORTAL_ROOT, STACK_ROOT, BACKUPS_DIR)
+
+
+@app.errorhandler(CSRFError)
+def handle_csrf_error(e):
+    flash('El formulario expiró por inactividad. Volvé a intentar la acción.', 'error')
+    next_url = request.referrer
+    if next_url and next_url.startswith(request.host_url):
+        return redirect(next_url)
+    return redirect(url_for('admin_panel') if get_admin_id() else url_for('admin_login'))
 
 
 def _no_cache(response):
@@ -202,7 +241,33 @@ def load_projects():
             'cpu_limit': item.get('cpu_limit'),
             'mem_limit_mb': item.get('mem_limit_mb'),
         })
+    _autolink_containers(projects)
     return projects
+
+
+def _autolink_containers(projects):
+    """Si un proyecto se registró antes de que existieran sus contenedores
+    (p.ej. se importó la carpeta y luego se hizo el build), quedaba sin
+    contenedores y no aparecía en el Resumen. Los buscamos y los guardamos."""
+    pending = [p for p in projects if not p['containers'] and (p['folder'] or '').startswith('html/')]
+    if not pending:
+        return
+    all_containers, err = list_all_containers()
+    if err or not all_containers:
+        return
+    claimed = {c for p in projects for c in p['containers']}
+    for project in pending:
+        dir_name = project['folder'].split('/', 1)[1].strip('/')
+        if not dir_name or '/' in dir_name:
+            continue
+        found = sorted({
+            c['name'] for c in project_scan.match_containers(dir_name, all_containers)
+            if c['name'] not in claimed
+        })
+        if found:
+            panel_db.set_containers(PORTAL_ROOT, project['db_id'], found)
+            project['containers'] = found
+            claimed.update(found)
 
 
 def _donut_segments(categories):
@@ -279,6 +344,63 @@ def inject_admin():
 
 
 @app.before_request
+def _block_banned_ips():
+    g.client_ip = security.client_ip(request)
+    if security.is_banned(PORTAL_ROOT, g.client_ip):
+        resp = make_response(
+            'Acceso bloqueado temporalmente por demasiados intentos fallidos.\n', 403
+        )
+        resp.headers['Content-Type'] = 'text/plain; charset=utf-8'
+        return _no_cache(resp)
+    return None
+
+
+_TWO_FA_EXEMPT = ('/admin/2fa', '/admin/logout', '/static/')
+
+
+@app.before_request
+def _validate_admin_session():
+    """Cierra la sesión si fue revocada, superó su vida máxima o lleva
+    demasiado tiempo inactiva; y obliga a configurar 2FA si es requisito."""
+    admin_id = get_admin_id()
+    if not admin_id:
+        return None
+    rules = security.get_rules(PORTAL_ROOT)
+    now = int(datetime.now(timezone.utc).timestamp())
+    epoch = get_session_epoch(PORTAL_ROOT, admin_id)
+    expired = (
+        epoch is None
+        or session.get('epoch') != epoch
+        or now - int(session.get('auth_at', 0)) > rules['sec_session_hours'] * 3600
+        or now - int(session.get('seen_at', 0)) > rules['sec_idle_minutes'] * 60
+    )
+    if expired:
+        logout_admin()
+        if request.path.startswith('/admin'):
+            flash('Tu sesión expiró. Vuelve a iniciar sesión.', 'error')
+            return redirect(url_for('admin_login', next=request.path))
+        return None
+    # Se renueva como mucho una vez por minuto para no reescribir la cookie
+    # en cada petición (las métricas se consultan cada pocos segundos).
+    if now - int(session.get('seen_at', 0)) >= 60:
+        session['seen_at'] = now
+    if rules['sec_require_2fa'] and not request.path.startswith(_TWO_FA_EXEMPT):
+        _, enabled = get_totp_state(PORTAL_ROOT, admin_id)
+        if not enabled:
+            flash('La verificación en dos pasos es obligatoria. Actívala para continuar.', 'error')
+            return redirect(url_for('admin_2fa'))
+    return None
+
+
+@app.after_request
+def _security_headers(response):
+    response.headers.setdefault('X-Content-Type-Options', 'nosniff')
+    response.headers.setdefault('X-Frame-Options', 'SAMEORIGIN')
+    response.headers.setdefault('Referrer-Policy', 'same-origin')
+    return response
+
+
+@app.before_request
 def _ensure_first_run_setup():
     if request.path == '/setup' or request.path.startswith('/static/'):
         return None
@@ -311,7 +433,7 @@ def setup_wizard():
                 if settings:
                     panel_db.set_settings(PORTAL_ROOT, settings)
                 admin, _ = authenticate(PORTAL_ROOT, new_email, password)
-                login_admin(admin)
+                login_admin(admin, PORTAL_ROOT)
                 panel_db.log_action(PORTAL_ROOT, new_email, 'setup_completed', '')
                 flash('Panel configurado. ¡Bienvenido!', 'success')
                 return redirect(url_for('admin_panel'))
@@ -327,49 +449,78 @@ def portal_home():
     return _no_cache(resp)
 
 
+def _safe_next(url):
+    return url if url and url.startswith('/') and not url.startswith('//') else url_for('admin_panel')
+
+
 @app.route('/admin/login', methods=['GET', 'POST'])
 def admin_login():
     if get_admin_id():
         return redirect(url_for('admin_panel'))
     error = None
     if request.method == 'POST':
-        admin, error = authenticate(
-            PORTAL_ROOT,
-            request.form.get('email', ''),
-            request.form.get('password', ''),
-        )
-        if admin:
-            if admin.get('totp_enabled'):
+        ip = g.client_ip
+        email = request.form.get('email', '')
+        ua = request.headers.get('User-Agent', '')
+        if security.account_locked(PORTAL_ROOT, email.strip().lower(), ip):
+            # Mismo mensaje que un fallo normal: no se le confirma al atacante
+            # que la cuenta existe ni que está protegida.
+            security.record_attempt(PORTAL_ROOT, ip, 'login', email, False, ua)
+            error = 'Correo o contraseña incorrectos.'
+        else:
+            admin, error = authenticate(PORTAL_ROOT, email, request.form.get('password', ''))
+            if admin and admin.get('totp_enabled'):
+                # La contraseña sola no cuenta como acceso: el éxito se
+                # registra cuando también pasa el segundo paso.
+                session.clear()
                 session['pending_admin_id'] = admin['id']
-                session['pending_next'] = request.args.get('next') or url_for('admin_panel')
+                session['pending_at'] = int(datetime.now(timezone.utc).timestamp())
+                session['pending_tries'] = 0
+                session['pending_next'] = _safe_next(request.args.get('next'))
                 return redirect(url_for('admin_login_verify'))
-            login_admin(admin)
-            panel_db.log_action(PORTAL_ROOT, admin['email'], 'login', '')
-            flash('Sesión de administrador iniciada.', 'success')
-            next_url = request.args.get('next') or url_for('admin_panel')
-            if not next_url.startswith('/'):
-                next_url = url_for('admin_panel')
-            return redirect(next_url)
+            security.record_attempt(PORTAL_ROOT, ip, 'login', email, bool(admin), ua)
+            if admin:
+                login_admin(admin, PORTAL_ROOT)
+                panel_db.log_action(PORTAL_ROOT, admin['email'], 'login', ip)
+                flash('Sesión de administrador iniciada.', 'success')
+                return redirect(_safe_next(request.args.get('next')))
+        if security.is_banned(PORTAL_ROOT, ip):
+            return _block_banned_ips()
     resp = make_response(render_template('admin_login.html', error=error))
     return _no_cache(resp)
+
+
+_PENDING_2FA_SECONDS = 300
 
 
 @app.route('/admin/login/verify', methods=['GET', 'POST'])
 def admin_login_verify():
     admin_id = session.get('pending_admin_id')
-    if not admin_id:
+    now = int(datetime.now(timezone.utc).timestamp())
+    if not admin_id or now - int(session.get('pending_at', 0)) > _PENDING_2FA_SECONDS:
+        session.clear()
         return redirect(url_for('admin_login'))
     error = None
     if request.method == 'POST':
-        secret, enabled = get_totp_state(PORTAL_ROOT, admin_id)
-        code = (request.form.get('code') or '').strip()
-        if enabled and secret and pyotp.TOTP(secret).verify(code, valid_window=1):
-            next_url = session.get('pending_next') or url_for('admin_panel')
-            row = next((a for a in list_admins(PORTAL_ROOT) if a['id'] == admin_id), None)
-            login_admin({'id': admin_id})  # limpia la sesión y guarda admin_id
-            panel_db.log_action(PORTAL_ROOT, row['email'] if row else '', 'login_2fa', '')
+        ip = g.client_ip
+        row = next((a for a in list_admins(PORTAL_ROOT) if a['id'] == admin_id), None)
+        email = row['email'] if row else ''
+        ua = request.headers.get('User-Agent', '')
+        if verify_totp(PORTAL_ROOT, admin_id, request.form.get('code')):
+            next_url = _safe_next(session.get('pending_next'))
+            security.record_attempt(PORTAL_ROOT, ip, '2fa', email, True, ua)
+            login_admin({'id': admin_id}, PORTAL_ROOT)  # limpia la sesión y guarda admin_id
+            panel_db.log_action(PORTAL_ROOT, email, 'login_2fa', ip)
             flash('Sesión de administrador iniciada.', 'success')
             return redirect(next_url)
+        security.record_attempt(PORTAL_ROOT, ip, '2fa', email, False, ua)
+        session['pending_tries'] = int(session.get('pending_tries', 0)) + 1
+        if security.pending_2fa_exhausted(session['pending_tries']):
+            session.clear()
+            flash('Demasiados códigos incorrectos. Vuelve a iniciar sesión.', 'error')
+            return redirect(url_for('admin_login'))
+        if security.is_banned(PORTAL_ROOT, ip):
+            return _block_banned_ips()
         error = 'Código incorrecto.'
     return render_template('admin_login_verify.html', error=error)
 
@@ -501,6 +652,7 @@ def admin_project_new():
             request.form.get('icon_path', ''),
         )
         if project:
+            project = _ensure_project_folder(project)
             want_ssl = request.form.get('access_mode') == 'domain' and request.form.get('request_ssl') == 'on'
             if project.get('access_mode') == 'domain' and project.get('domain'):
                 target_host = 'host.docker.internal'
@@ -614,21 +766,9 @@ def admin_project_sftp_create(project_id):
     project = panel_db.get_project(PORTAL_ROOT, project_id)
     if not project:
         abort(404)
-    if not project.get('folder'):
-        # Proyectos agregados como "solo enlace" (sin carpeta propia) no
-        # tienen dónde recibir archivos todavía; se les crea una carpeta en
-        # html/ la primera vez que alguien pide un acceso SFTP.
-        folder = f"html/{project['project_key']}"
-        html_root = files_control.html_root(STACK_ROOT)
-        target_dir = os.path.join(html_root, project['project_key'])
-        os.makedirs(target_dir, exist_ok=True)
-        try:
-            os.chown(target_dir, -1, os.stat(html_root).st_gid)
-        except OSError:
-            pass
-        os.chmod(target_dir, 0o775)
-        panel_db.set_project_folder(PORTAL_ROOT, project_id, folder)
-        project['folder'] = folder
+    # Proyectos antiguos que quedaron "solo enlace" (sin carpeta propia)
+    # todavía pueden no tener carpeta; se crea aquí también por si acaso.
+    project = _ensure_project_folder(project)
 
     username = (request.form.get('username') or '').strip().lower()
     if not panel_db.KEY_RE.match(username):
@@ -845,6 +985,7 @@ def admin_project_detail(project_id):
         has_git=has_git,
         has_env=has_env,
         can_clone=bool(project.get('template')),
+        has_php_config=project.get('template') == 'wordpress',
         repos=panel_db.project_repos(project),
         sftp_users=panel_db.list_sftp_users(PORTAL_ROOT, project_id),
         sftp_host=get_public_host(),
@@ -1026,9 +1167,13 @@ def admin_project_database(project_id):
         else:
             flash(f'Conexión agregada, pero no se pudo verificar ahora mismo: {err}', 'error')
         return redirect(url_for('admin_project_database', project_id=project_id))
+    template_label = None
+    if project.get('template'):
+        template_label = app_templates.TEMPLATES.get(project['template'], {}).get('label', project['template'])
     return render_template(
         'admin_project_database.html', project=project,
         databases=panel_db.list_databases(PORTAL_ROOT, project_id), error=error,
+        template_label=template_label,
     )
 
 
@@ -1041,7 +1186,7 @@ def admin_project_database_autodetect(project_id):
         flash('Este proyecto no tiene carpeta asociada; agrega la conexión manualmente.', 'error')
         return redirect(url_for('admin_project_database', project_id=project_id))
     local_folder = os.path.join(files_control.html_root(STACK_ROOT), project['folder'][5:])
-    candidate, error = db_autodetect.autodetect(local_folder)
+    candidate, error = db_autodetect.autodetect(local_folder, project=project)
     if not candidate:
         flash(error, 'error')
         return redirect(url_for('admin_project_database', project_id=project_id))
@@ -1052,6 +1197,35 @@ def admin_project_database_autodetect(project_id):
     panel_db.log_action(PORTAL_ROOT, current_admin_email(), 'db_autodetect', f"{project['name']}: {candidate['host']}:{candidate['port']}")
     flash(f"Conectado automáticamente a {candidate['dbname']} ({candidate['host']}:{candidate['port']}).", 'success')
     return redirect(url_for('admin_project_database', project_id=project_id))
+
+
+@app.route('/admin/projects/<int:project_id>/php-config', methods=['GET', 'POST'])
+def admin_project_php_config(project_id):
+    gate = _require_admin()
+    if gate:
+        return gate
+    project = panel_db.get_project(PORTAL_ROOT, project_id)
+    if not project or project.get('template') != 'wordpress' or not project.get('folder'):
+        abort(404)
+    local_folder = os.path.join(files_control.html_root(STACK_ROOT), project['folder'][5:])
+    host_folder = os.path.join(HOST_STACK_ROOT, project['folder'])
+    app_container = f"{project['project_key']}-app"
+
+    error = None
+    if request.method == 'POST':
+        values = {key: request.form.get(key, '') for key in app_templates.DEFAULT_PHP_CONFIG}
+        ok, err = app_templates.save_php_config(app_container, local_folder, host_folder, values)
+        if ok:
+            panel_db.log_action(PORTAL_ROOT, current_admin_email(), 'php_config', project['name'])
+            flash('Configuración de PHP guardada. El contenedor se reinició para aplicarla.', 'success')
+            return redirect(url_for('admin_project_php_config', project_id=project_id))
+        error = err
+        flash(f'No se pudo guardar: {err}', 'error')
+
+    values = app_templates.read_php_config(local_folder)
+    return render_template(
+        'admin_project_php_config.html', project=project, values=values, error=error,
+    )
 
 
 @app.route('/admin/projects/<int:project_id>/database/<int:db_id>/delete', methods=['POST'])
@@ -1476,18 +1650,295 @@ def admin_project_wipe(project_id):
     return redirect(url_for('admin_projects'))
 
 
+def _panel_port():
+    host = request.host
+    if host.rsplit(':', 1)[-1].isdigit() and not host.endswith(']'):
+        return int(host.rsplit(':', 1)[1])
+    return 443 if request.scheme == 'https' else 80
+
+
 @app.route('/admin/firewall')
 def admin_firewall():
     gate = _require_admin()
     if gate:
         return gate
-    port_projects = [
-        p for p in panel_db.list_projects_raw(PORTAL_ROOT)
-        if p.get('access_mode') == 'port' and p.get('port')
-    ]
-    port_projects.sort(key=lambda p: p['port'])
-    resp = make_response(render_template('admin_firewall.html', port_projects=port_projects))
+    if firewall_rules.expire_if_needed(PORTAL_ROOT):
+        flash('El último cambio de puertos no se confirmó a tiempo y se revirtió solo.', 'error')
+    guard_status, guard_error = guard_client.status()
+    published, docker_err = list_published_ports()
+    listening = (guard_status or {}).get('listening') or []
+    resp = make_response(render_template(
+        'admin_firewall.html',
+        rows=firewall_rules.port_table(PORTAL_ROOT, published, listening),
+        policies=firewall_rules.POLICIES,
+        pending=firewall_rules.get_pending(PORTAL_ROOT),
+        confirm_seconds=firewall_rules.CONFIRM_SECONDS,
+        guard=guard_status,
+        guard_error=guard_error,
+        docker_err=docker_err,
+        my_ip=g.client_ip,
+        panel_port=_panel_port(),
+    ))
     return _no_cache(resp)
+
+
+@app.route('/admin/firewall/apply', methods=['POST'])
+def admin_firewall_apply():
+    gate = _require_admin()
+    if gate:
+        return gate
+    rules, error = firewall_rules.parse_form(request.form)
+    if not error:
+        guard_status, _ = guard_client.status()
+        static_allow = (guard_status or {}).get('static_allow') or []
+        error = firewall_rules.lockout_error(PORTAL_ROOT, rules, g.client_ip, _panel_port(), static_allow)
+    if error:
+        flash(error, 'error')
+        return redirect(url_for('admin_firewall'))
+    firewall_rules.propose(PORTAL_ROOT, rules, current_admin_email())
+    panel_db.log_action(PORTAL_ROOT, current_admin_email(), 'fw_proposed', firewall_rules.describe(rules))
+    flash(
+        f'Cambios aplicados a prueba. Si sigues viendo esta página, confírmalos antes de '
+        f'{firewall_rules.CONFIRM_SECONDS // 60} minutos; si no, se revierten solos.',
+        'success',
+    )
+    return redirect(url_for('admin_firewall'))
+
+
+@app.route('/admin/firewall/confirm', methods=['POST'])
+def admin_firewall_confirm():
+    gate = _require_admin()
+    if gate:
+        return gate
+    if firewall_rules.confirm(PORTAL_ROOT):
+        panel_db.log_action(
+            PORTAL_ROOT, current_admin_email(), 'fw_confirmed',
+            firewall_rules.describe(firewall_rules.get_committed(PORTAL_ROOT)),
+        )
+        flash('Cambios de puertos confirmados.', 'success')
+    else:
+        flash('No hay cambios pendientes: el plazo ya venció y se revirtieron.', 'error')
+    return redirect(url_for('admin_firewall'))
+
+
+@app.route('/admin/firewall/revert', methods=['POST'])
+def admin_firewall_revert():
+    gate = _require_admin()
+    if gate:
+        return gate
+    firewall_rules.revert(PORTAL_ROOT)
+    panel_db.log_action(PORTAL_ROOT, current_admin_email(), 'fw_reverted', 'revertido a mano')
+    flash('Cambios descartados: se volvió a las reglas anteriores.', 'success')
+    return redirect(url_for('admin_firewall'))
+
+
+_BAN_DURATIONS = {
+    '60': ('1 hora', 60),
+    '1440': ('24 horas', 1440),
+    '10080': ('7 días', 10080),
+    '43200': ('30 días', 43200),
+    'perm': ('Permanente', None),
+}
+
+
+@app.route('/admin/security')
+def admin_security():
+    gate = _require_admin()
+    if gate:
+        return gate
+    ip = g.client_ip
+    guard_status, guard_error = guard_client.status()
+    service = request.args.get('service') or None
+    if service not in security.SERVICE_LABELS:
+        service = None
+    def _table_args(prefix, default_sort):
+        try:
+            page = int(request.args.get(prefix + 'page', 1))
+            per = int(request.args.get(prefix + 'per', security.PAGE_SIZES[0]))
+        except ValueError:
+            page, per = 1, security.PAGE_SIZES[0]
+        return {
+            'q': request.args.get(prefix + 'q', ''),
+            'sort': request.args.get(prefix + 'sort', default_sort),
+            'direction': request.args.get(prefix + 'dir', 'desc'),
+            'page': page,
+            'per_page': per,
+        }
+
+    bans = security.query_bans(PORTAL_ROOT, active=True, **_table_args('b', 'created_at'))
+    history = security.query_bans(PORTAL_ROOT, active=False, **_table_args('h', 'created_at'))
+    result = request.args.get('eres', '')
+    events = security.query_events(
+        PORTAL_ROOT, service=service, result=result if result in ('ok', 'fail') else '',
+        **_table_args('e', 'ts'),
+    )
+    # Estado de las tres tablas en la URL: cada enlace de orden/página cambia
+    # solo lo suyo y conserva el resto.
+    table_params = {'service': service, 'eres': events['result']}
+    for prefix, t, default_sort in (('b', bans, 'created_at'), ('h', history, 'created_at'), ('e', events, 'ts')):
+        table_params.update({
+            prefix + 'q': t['q'],
+            prefix + 'sort': t['sort'] if t['sort'] != default_sort else None,
+            prefix + 'dir': t['direction'] if t['direction'] != 'desc' else None,
+            prefix + 'per': t['per_page'] if t['per_page'] != security.PAGE_SIZES[0] else None,
+            prefix + 'page': t['page'] if t['page'] != 1 else None,
+        })
+    table_params = {k: v for k, v in table_params.items() if v}
+    resp = make_response(render_template(
+        'admin_security.html',
+        summary=security.summary(PORTAL_ROOT),
+        bans=bans,
+        history=history,
+        table_params=table_params,
+        allowlist=security.list_allowlist(PORTAL_ROOT),
+        events=events,
+        service_filter=service,
+        service_labels=security.SERVICE_LABELS,
+        jails=security.get_jails(PORTAL_ROOT),
+        jail_modes=security.JAIL_MODES,
+        jail_stats=security.jail_stats(PORTAL_ROOT),
+        chart=security.attack_chart(PORTAL_ROOT),
+        rules=security.get_rules(PORTAL_ROOT),
+        recidive=security.recidive_examples(security.get_rules(PORTAL_ROOT), security.get_jails(PORTAL_ROOT)),
+        recidive_max=security.human_minutes(security.get_rules(PORTAL_ROOT)['sec_ban_max_minutes']),
+        durations=_BAN_DURATIONS,
+        my_ip=ip,
+        my_ip_allowlisted=security.is_allowlisted(PORTAL_ROOT, ip),
+        trusted_proxies=os.environ.get('PORTAL_TRUSTED_PROXIES', ''),
+        guard=guard_status,
+        guard_error=guard_error,
+    ))
+    return _no_cache(resp)
+
+
+@app.route('/admin/security/jails', methods=['POST'])
+def admin_security_jails():
+    gate = _require_admin()
+    if gate:
+        return gate
+    ok, error = security.save_jails(PORTAL_ROOT, request.form)
+    if ok:
+        detail = ', '.join(
+            f'{name}={conf["mode"]}/{conf["max_failures"]}x{conf["window_minutes"]}m/{conf["ban_minutes"]}m'
+            for name, conf in security.get_jails(PORTAL_ROOT).items()
+        )
+        panel_db.log_action(PORTAL_ROOT, current_admin_email(), 'jails_updated', detail)
+        flash('Detección automática guardada. El servidor la aplica en unos segundos.', 'success')
+    else:
+        flash(error, 'error')
+    return redirect(url_for('admin_security') + '#deteccion')
+
+
+@app.route('/admin/security/guard/sync', methods=['POST'])
+def admin_security_guard_sync():
+    gate = _require_admin()
+    if gate:
+        return gate
+    ok, message = guard_client.sync()
+    if ok:
+        flash(f'Firewall del servidor sincronizado ({message}).', 'success')
+    else:
+        flash(f'El agente del firewall no respondió: {message}', 'error')
+    return redirect(url_for('admin_security') + '#firewall')
+
+
+@app.route('/admin/security/rules', methods=['POST'])
+def admin_security_rules():
+    gate = _require_admin()
+    if gate:
+        return gate
+    ok, error = security.save_rules(PORTAL_ROOT, request.form)
+    if ok:
+        rules = security.get_rules(PORTAL_ROOT)
+        detail = ', '.join(f'{k.removeprefix("sec_")}={v}' for k, v in rules.items())
+        panel_db.log_action(PORTAL_ROOT, current_admin_email(), 'security_rules_updated', detail)
+        flash('Reglas de seguridad guardadas.', 'success')
+    else:
+        flash(error, 'error')
+    return redirect(url_for('admin_security') + '#reglas')
+
+
+def _security_back(default_anchor):
+    """Vuelve a la misma búsqueda/página de la tabla desde la que se actuó.
+    Solo se aceptan rutas de esta misma página (nada de redirecciones abiertas)."""
+    back = request.form.get('back', '')
+    if not back.startswith('/admin/security') or '//' in back or '\\' in back:
+        return url_for('admin_security') + '#' + default_anchor
+    return back if '#' in back else back + '#' + default_anchor
+
+
+@app.route('/admin/security/ban', methods=['POST'])
+def admin_security_ban():
+    gate = _require_admin()
+    if gate:
+        return gate
+    duration = _BAN_DURATIONS.get(request.form.get('duration', ''), _BAN_DURATIONS['1440'])
+    cidr, error = security.manual_ban(
+        PORTAL_ROOT,
+        request.form.get('ip', ''),
+        duration[1],
+        (request.form.get('reason') or '').strip(),
+        current_admin_email(),
+        g.client_ip,
+    )
+    if cidr:
+        panel_db.log_action(PORTAL_ROOT, current_admin_email(), 'ip_banned_manual', f'{cidr} · {duration[0]}')
+        flash(f'{cidr} bloqueada ({duration[0].lower()}).', 'success')
+    else:
+        flash(error, 'error')
+    return redirect(_security_back('bloqueos'))
+
+
+@app.route('/admin/security/ban/<int:ban_id>/lift', methods=['POST'])
+def admin_security_lift(ban_id):
+    gate = _require_admin()
+    if gate:
+        return gate
+    cidr = security.lift_ban(PORTAL_ROOT, ban_id, current_admin_email())
+    if cidr:
+        panel_db.log_action(PORTAL_ROOT, current_admin_email(), 'ip_unbanned', cidr)
+        flash(f'{cidr} desbloqueada.', 'success')
+    return redirect(_security_back('bloqueos'))
+
+
+@app.route('/admin/security/allow', methods=['POST'])
+def admin_security_allow():
+    gate = _require_admin()
+    if gate:
+        return gate
+    cidr, error = security.add_allowlist(
+        PORTAL_ROOT, request.form.get('ip', ''), request.form.get('note', ''), current_admin_email(),
+    )
+    if cidr:
+        panel_db.log_action(PORTAL_ROOT, current_admin_email(), 'allowlist_added', cidr)
+        flash(f'{cidr} agregada a la lista blanca.', 'success')
+    else:
+        flash(error, 'error')
+    return redirect(url_for('admin_security') + '#lista-blanca')
+
+
+@app.route('/admin/security/allow/<int:entry_id>/delete', methods=['POST'])
+def admin_security_allow_delete(entry_id):
+    gate = _require_admin()
+    if gate:
+        return gate
+    cidr = security.remove_allowlist(PORTAL_ROOT, entry_id)
+    if cidr:
+        panel_db.log_action(PORTAL_ROOT, current_admin_email(), 'allowlist_removed', cidr)
+        flash(f'{cidr} quitada de la lista blanca.', 'success')
+    return redirect(url_for('admin_security') + '#lista-blanca')
+
+
+@app.route('/admin/security/sessions/revoke', methods=['POST'])
+def admin_security_revoke_sessions():
+    gate = _require_admin()
+    if gate:
+        return gate
+    revoke_sessions(PORTAL_ROOT)
+    login_admin({'id': get_admin_id()}, PORTAL_ROOT)
+    panel_db.log_action(PORTAL_ROOT, current_admin_email(), 'sessions_revoked', 'todas menos la actual')
+    flash('Se cerraron todas las sesiones abiertas, excepto la tuya.', 'success')
+    return redirect(url_for('admin_security') + '#sesiones')
 
 
 @app.route('/admin/proxy')
@@ -1677,13 +2128,14 @@ def admin_2fa():
             secret = pyotp.random_base32()
             set_totp_secret(PORTAL_ROOT, admin_id, secret)
         elif action == 'confirm':
-            code = (request.form.get('code') or '').strip()
-            if secret and pyotp.TOTP(secret).verify(code, valid_window=1):
+            if secret and verify_totp(PORTAL_ROOT, admin_id, request.form.get('code')):
                 confirm_totp(PORTAL_ROOT, admin_id)
                 panel_db.log_action(PORTAL_ROOT, current_admin_email(), '2fa_enabled', '')
                 flash('Verificación en dos pasos activada.', 'success')
                 return redirect(url_for('admin_admins'))
             error = 'Código incorrecto. Escanea de nuevo o verifica la hora de tu teléfono.'
+        elif action == 'disable' and security.get_rules(PORTAL_ROOT)['sec_require_2fa']:
+            error = 'La verificación en dos pasos es obligatoria en este panel; no se puede desactivar.'
         elif action == 'disable':
             disable_totp(PORTAL_ROOT, admin_id)
             panel_db.log_action(PORTAL_ROOT, current_admin_email(), '2fa_disabled', '')
@@ -1695,9 +2147,15 @@ def admin_2fa():
     otpauth_uri = pyotp.totp.TOTP(secret).provisioning_uri(
         name=admin['email'] if admin else '', issuer_name='Panel'
     ) if secret else None
-    return render_template(
+    # El QR se genera aquí mismo (SVG en línea): la clave secreta nunca sale
+    # hacia un servicio externo de códigos QR.
+    qr_svg = segno.make(otpauth_uri, error='m').svg_inline(
+        scale=5, border=4, dark='#000000', light='#ffffff',
+    ) if otpauth_uri and not enabled else None
+    return _no_cache(make_response(render_template(
         'admin_2fa.html', enabled=enabled, secret=secret, otpauth_uri=otpauth_uri, error=error,
-    )
+        qr_svg=qr_svg,
+    )))
 
 
 def current_admin_email():
@@ -1840,7 +2298,11 @@ def admin_change_password():
             request.form.get('new_password', ''),
         )
         if ok:
-            flash('Contraseña actualizada.', 'success')
+            # change_password ya invalidó todas las sesiones de este admin;
+            # se renueva solo la actual para no echarlo a él también.
+            login_admin({'id': get_admin_id()}, PORTAL_ROOT)
+            panel_db.log_action(PORTAL_ROOT, current_admin_email(), 'password_changed', g.client_ip)
+            flash('Contraseña actualizada. Se cerraron tus otras sesiones abiertas.', 'success')
             return redirect(url_for('admin_admins'))
     return render_template('admin_password.html', error=error)
 

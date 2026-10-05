@@ -47,7 +47,7 @@
 				<td>{{ f.mtime.strftime('%Y-%m-%d %H:%M') }}</td>
 				<td style="white-space:nowrap;">
 					<a class="btn btn-secondary btn-sm" href="/admin/backups/{{ f.name }}/download">Descargar</a>
-					<form method="post" action="/admin/backups/{{ f.name }}/delete" style="display:inline;" onsubmit="return confirm('¿Eliminar {{ f.name }}?');">
+					<form method="post" action="/admin/backups/{{ f.name }}/delete" class="inline-form" onsubmit="return confirm('¿Eliminar {{ f.name }}?');">
 						<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
 						<button type="submit" class="btn btn-danger btn-sm">Eliminar</button>
 					</form>

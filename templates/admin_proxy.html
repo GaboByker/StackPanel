@@ -87,16 +87,16 @@
 							</td>
 							<td style="white-space:nowrap;">
 								{% if s.managed %}
-								<form method="post" action="/admin/proxy/{{ s.id }}/ssl" style="display:inline;" onsubmit="return confirm('¿Emitir/renovar el certificado SSL de {{ s.domain }}?');">
+								<form method="post" action="/admin/proxy/{{ s.id }}/ssl" class="inline-form" onsubmit="return confirm('¿Emitir/renovar el certificado SSL de {{ s.domain }}?');">
 									<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
 									<button type="submit" class="btn btn-secondary btn-sm">{{ 'Renovar SSL' if s.ssl_enabled else 'Emitir SSL' }}</button>
 								</form>
-								<form method="post" action="/admin/proxy/{{ s.id }}/delete" style="display:inline;" onsubmit="return confirm('¿Eliminar el sitio {{ s.domain }} del proxy?');">
+								<form method="post" action="/admin/proxy/{{ s.id }}/delete" class="inline-form" onsubmit="return confirm('¿Eliminar el sitio {{ s.domain }} del proxy?');">
 									<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
 									<button type="submit" class="btn btn-danger btn-sm">Eliminar</button>
 								</form>
 								{% else %}
-								<form method="post" action="/admin/proxy/{{ s.id }}/ssl" style="display:inline;" onsubmit="return confirm('¿Renovar el certificado SSL de {{ s.domain }}?');">
+								<form method="post" action="/admin/proxy/{{ s.id }}/ssl" class="inline-form" onsubmit="return confirm('¿Renovar el certificado SSL de {{ s.domain }}?');">
 									<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
 									<button type="submit" class="btn btn-secondary btn-sm">Renovar SSL</button>
 								</form>

@@ -12,6 +12,8 @@ import backup_control
 import docker_control
 import notification_control
 import panel_db
+import proxy_control
+import security
 from system_monitor import get_system_metrics
 
 _STARTED = False
@@ -38,7 +40,10 @@ def _loop(root, stack_root, backups_dir):
             if tick % 6 == 0:
                 _check_disk(root)
                 _check_ssl(root)
+                security.prune(root)
+                _daily_proxy_reload(root)
             _run_scheduled_backups(root, stack_root, backups_dir)
+            security.notify_pending_bans(root)
         except Exception:
             pass
         tick += 1
@@ -98,6 +103,30 @@ def _check_ssl(root):
                 )
         except Exception:
             continue
+
+
+def _daily_proxy_reload(root):
+    """certbot (contenedor proxy-certbot) renueva los certificados cada 12 h,
+    pero nginx sigue sirviendo el que cargó al arrancar hasta que se recarga.
+    Sin esto, un certificado renovado no entra en uso y la web caduca igual.
+    Una vez al día: `nginx -t` y, si pasa, `nginx -s reload` (no corta
+    conexiones). Si algo falla, queda en Auditoría."""
+    today = datetime.now(timezone.utc).date().isoformat()
+    if panel_db.get_setting(root, 'proxy_last_reload') == today:
+        return
+    try:
+        ok, out = proxy_control.nginx_test()
+        if ok:
+            ok, out = proxy_control.nginx_reload()
+    except Exception as exc:
+        ok, out = False, str(exc)
+    # Se marca el día aunque falle, para no reintentar (ni avisar) cada 30 min.
+    panel_db.set_settings(root, {'proxy_last_reload': today})
+    if not ok:
+        panel_db.log_action(
+            root, None, 'proxy_reload_failed',
+            f'No se pudo recargar nginx para aplicar certificados renovados: {(out or "").strip()[-300:]}',
+        )
 
 
 def _run_scheduled_backups(root, stack_root, backups_dir):

@@ -94,6 +94,69 @@ def remove_container(name, force=True):
     request('DELETE', f'/containers/{name}?force={"true" if force else "false"}')
 
 
+def connect_network(network, container):
+    """Conecta un contenedor a una red ya existente. Idempotente: si ya
+    estaba conectado, Docker devuelve error pero lo tratamos como éxito."""
+    if not network or not container:
+        return False, 'faltan datos'
+    status, raw = request('POST', f'/networks/{network}/connect', body={'Container': container})
+    if status in (200, 201):
+        return True, ''
+    msg = raw.decode('utf-8', errors='replace')
+    if 'already exists' in msg or 'already connected' in msg:
+        return True, ''
+    return False, msg
+
+
+def inspect_container(name):
+    """Config actual de un contenedor ya creado, en el formato que espera
+    create_container, para poder recrearlo agregando algo (ej. un bind
+    nuevo) sin perder su configuración."""
+    status, raw = request('GET', f'/containers/{name}/json')
+    if status != 200:
+        return None
+    data = json.loads(raw)
+    env = {}
+    for item in (data.get('Config', {}).get('Env') or []):
+        if '=' in item:
+            k, v = item.split('=', 1)
+            env[k] = v
+    ports = {}
+    for container_port, bindings in (data.get('HostConfig', {}).get('PortBindings') or {}).items():
+        if bindings:
+            ports[container_port] = bindings[0].get('HostPort')
+    networks = data.get('NetworkSettings', {}).get('Networks') or {}
+    return {
+        'image': data.get('Config', {}).get('Image'),
+        'env': env,
+        'binds': list(data.get('HostConfig', {}).get('Binds') or []),
+        'ports': ports,
+        'network': next(iter(networks), None),
+    }
+
+
+def exec_run(container, cmd, timeout=10):
+    """Corre un comando dentro de un contenedor ya creado y devuelve su
+    exit code (None si no se pudo ni siquiera lanzar el exec)."""
+    status, raw = request('POST', f'/containers/{container}/exec', body={
+        'Cmd': cmd,
+        'AttachStdout': True,
+        'AttachStderr': True,
+    }, timeout=timeout)
+    if status >= 400:
+        return None
+    exec_id = json.loads(raw).get('Id')
+    if not exec_id:
+        return None
+    status, _ = request('POST', f'/exec/{exec_id}/start', body={'Detach': False, 'Tty': False}, timeout=timeout)
+    if status >= 400:
+        return None
+    status, raw = request('GET', f'/exec/{exec_id}/json', timeout=timeout)
+    if status >= 400:
+        return None
+    return json.loads(raw).get('ExitCode')
+
+
 def create_container(name, image, env=None, ports=None, binds=None, network=None, network_aliases=None,
                       cmd=None, working_dir=None, restart='unless-stopped'):
     """ports: {'80/tcp': host_port}. binds: ['/host/path:/container/path']."""

@@ -12,7 +12,7 @@
 <div class="admin-actions" style="margin-bottom:12px;">
 	<a class="btn btn-secondary btn-sm" href="/admin/files/{{ parent }}">{{ icon_chevron_left(cls='icon icon-sm') }} Subir un nivel</a>
 	{% if mode == 'dir' %}
-	<form method="post" action="/admin/files/{{ subpath }}/delete" style="display:inline;" onsubmit="return confirm('¿Eliminar la carpeta {{ subpath }} y TODO su contenido? Si el proyecto está en marcha se detendrá primero. Esto no se puede deshacer.');">
+	<form method="post" action="/admin/files/{{ subpath }}/delete" class="inline-form" onsubmit="return confirm('¿Eliminar la carpeta {{ subpath }} y TODO su contenido? Si el proyecto está en marcha se detendrá primero. Esto no se puede deshacer.');">
 		<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
 		<button type="submit" class="btn btn-danger btn-sm">Eliminar esta carpeta</button>
 	</form>
@@ -38,7 +38,7 @@
 				<td>{{ '—' if e.is_dir else (e.size|filesizeformat) }}</td>
 				<td style="white-space:nowrap;">
 					{% set warn = ('¿Eliminar la carpeta ' ~ e.name ~ ' y TODO su contenido? Si el proyecto está en marcha se detendrá primero. Esto no se puede deshacer.') if e.is_dir else ('¿Eliminar ' ~ e.name ~ '? Si el proyecto está en marcha se detendrá primero.') %}
-					<form method="post" action="/admin/files/{{ href }}/delete" style="display:inline;" onsubmit="return confirm({{ warn|tojson }});">
+					<form method="post" action="/admin/files/{{ href }}/delete" class="inline-form" onsubmit="return confirm({{ warn|tojson }});">
 						<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
 						<button type="submit" class="btn btn-danger btn-sm">Eliminar</button>
 					</form>
@@ -56,7 +56,7 @@
 	{% else %}
 	<form method="post">
 		<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-		<textarea name="content" spellcheck="false" style="width:100%; min-height:60vh; font-family:var(--mono); font-size:13px; padding:14px; border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--surface); color:var(--text); resize:vertical;">{{ content }}</textarea>
+		<textarea name="content" spellcheck="false" class="input-code input-code--editor">{{ content }}</textarea>
 		<div class="admin-actions">
 			<button type="submit" class="btn btn-primary">Guardar</button>
 		</div>

@@ -1,98 +1,127 @@
 {% extends "base_admin.html" %}
 {% block title %}Firewall{% endblock %}
 {% block heading %}Firewall{% endblock %}
+{% block topbar_actions %}
+<a class="btn btn-secondary btn-sm" href="/admin/security">Seguridad e IPs bloqueadas</a>
+{% endblock %}
 {% block content %}
 
-<p class="admin-hint">
-	El panel corre dentro de un contenedor Docker y, por diseño de seguridad, no tiene permiso para tocar el firewall del servidor directamente.
-	Esta página solo te muestra qué comando correr — cópialo y ejecútalo por SSH en el servidor (con <code>sudo</code>).
-</p>
-
-<article class="admin-service-card" style="max-width:680px; margin-bottom:24px;">
-	<div class="admin-service-head"><h3>Detectado en el servidor</h3></div>
-	<p><strong>UFW:</strong> activo, deniega todo el tráfico entrante por defecto salvo lo permitido explícitamente.</p>
-	<p><strong>fail2ban:</strong> activo, con jails <code>sshd</code>, <code>nginx-bad-request</code>, <code>nginx-botsearch</code>, <code>nginx-scanner</code> (bloquea IPs con comportamiento abusivo).</p>
-	<p class="admin-hint" style="margin:10px 0 0;">Para ver el estado real y actualizado en cualquier momento, corre por SSH:</p>
-	<p><code>sudo ufw status verbose</code> &nbsp; <code>sudo fail2ban-client status</code></p>
+{% if pending %}
+<article class="admin-service-card" id="fw-pending" data-seconds="{{ pending.seconds_left }}" style="margin-bottom:20px; border-color: var(--warn-border); background: var(--warn-bg);">
+	<p style="margin:0 0 10px;">
+		<strong>Cambios aplicados a prueba.</strong> Si puedes ver esta página es que no perdiste el acceso: confírmalos.
+		Si no los confirmas en <strong><span id="fw-countdown">{{ pending.seconds_left }}</span> s</strong>, el servidor vuelve solo a las reglas anteriores.
+	</p>
+	<div style="display:flex; gap:8px; flex-wrap:wrap;">
+		<form method="post" action="/admin/firewall/confirm">
+			<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+			<button type="submit" class="btn btn-primary btn-sm">Confirmar cambios</button>
+		</form>
+		<form method="post" action="/admin/firewall/revert">
+			<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+			<button type="submit" class="btn btn-secondary btn-sm">Descartar y volver atrás</button>
+		</form>
+	</div>
 </article>
+{% endif %}
+
+{% if not guard %}
+<article class="admin-service-card" style="margin-bottom:20px; border-color: var(--danger-border); background: var(--danger-bg);">
+	<p style="margin:0;"><strong>El agente del firewall no responde</strong> ({{ guard_error }}). Puedes preparar reglas, pero no se aplicarán en el servidor hasta que <code>stackpanel-guard</code> esté en marcha (<code>sudo ./guard/install-guard.sh</code>).</p>
+</article>
+{% elif guard.ports and guard.ports.version == 'pending' and not pending %}
+<p class="admin-hint">El servidor todavía aplica el cambio a prueba anterior; se actualizará en unos segundos.</p>
+{% endif %}
 
 <p class="admin-hint">
-	<strong>Nota:</strong> Docker no pasa por UFW para sus puertos publicados, así que estos comandos no afectan a tus proyectos en contenedores (ya son accesibles desde internet igual). Solo sirven para algo que corra nativo en el host, sin Docker.
+	Decide quién puede entrar a cada puerto del servidor, incluidos los que publican los contenedores de Docker (que UFW no controla).
+	<strong>Público</strong>: cualquiera. <strong>Solo IPs permitidas</strong>: solo las IPs o rangos que indiques. <strong>Cerrado</strong>: nadie desde internet; el proxy, los demás contenedores y el propio servidor sí siguen llegando (útil para proyectos que ya sirves por dominio a través del proxy).
 </p>
-
-<h2 class="landing-section-title">Puertos de tus proyectos (informativo)</h2>
-<p class="admin-hint">Estos comandos solo tienen efecto real si alguna vez dejas de correr estos proyectos en Docker. Mientras estén en contenedores, ya son accesibles desde internet independientemente de esto.</p>
-<div class="admin-table-wrap">
-	<table class="admin-table">
-		<thead><tr><th>Proyecto</th><th>Puerto</th><th>Comando</th><th></th></tr></thead>
-		<tbody>
-			{% for p in port_projects %}
-			<tr>
-				<td>{{ p.name }}</td>
-				<td><code>{{ p.port }}</code></td>
-				<td><code class="fw-cmd" id="cmd-{{ p.id }}">sudo ufw allow {{ p.port }}/tcp</code></td>
-				<td><button type="button" class="btn btn-secondary btn-sm fw-copy" data-target="cmd-{{ p.id }}">Copiar</button></td>
-			</tr>
-			{% else %}
-			<tr><td colspan="4" class="htop-loading">No hay proyectos por puerto registrados.</td></tr>
-			{% endfor %}
-		</tbody>
-	</table>
-</div>
-
-<h2 class="landing-section-title" style="margin-top:28px;">Rango para apps de 1 clic (20000-20999)</h2>
-<p class="admin-hint">Cada vez que instalas una app con "Instalar app" se le asigna un puerto libre de este rango. Como esos contenedores publican el puerto igual que los demás, <strong>ya son accesibles desde internet en cuanto se crean</strong> — no necesitas abrir nada en ufw para eso. El comando de abajo solo tendría efecto si algún día corres algo en ese rango fuera de Docker.</p>
-<p><code class="fw-cmd" id="cmd-range">sudo ufw allow 20000:20999/tcp</code>
-	<button type="button" class="btn btn-secondary btn-sm fw-copy" data-target="cmd-range">Copiar</button>
+<p class="admin-hint">
+	Siempre entran: las IPs de la <a href="/admin/security#lista-blanca">lista blanca</a>{% if guard and guard.static_allow %} y la lista de emergencia del servidor ({% for n in guard.static_allow %}<code>{{ n }}</code>{{ ', ' if not loop.last else '' }}{% endfor %}){% endif %}.
+	Las conexiones ya abiertas no se cortan al cambiar una regla. Tu IP es <code>{{ my_ip }}</code> y entras al panel por el puerto <code>{{ panel_port }}</code>.
 </p>
+{% if docker_err %}<p class="admin-hint" style="color:var(--danger-text);">No se pudo leer la lista de contenedores: {{ docker_err }}</p>{% endif %}
 
-<h2 class="landing-section-title" style="margin-top:28px;">Puerto personalizado</h2>
-<div class="form-row" style="max-width:420px; align-items:end;">
-	<div class="field" style="margin-bottom:0;">
-		<label for="custom-port">Puerto</label>
-		<input type="number" id="custom-port" min="1" max="65535" placeholder="5000"/>
+<form method="post" action="/admin/firewall/apply" id="fw-form">
+	<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+	<div class="admin-table-wrap">
+		<table class="admin-table">
+			<thead><tr><th>Puerto</th><th>Servicio</th><th>Exposición</th><th>IPs permitidas</th><th>Nota</th></tr></thead>
+			<tbody>
+				{% for r in rows %}
+				<tr class="fw-row">
+					<td>
+						<code>{{ r.port }}/{{ r.proto }}</code>
+						<input type="hidden" name="port_{{ loop.index }}" value="{{ r.port }}"/>
+						<input type="hidden" name="proto_{{ loop.index }}" value="{{ r.proto }}"/>
+						{% if (r.proto, r.port) in [('tcp', 22), ('tcp', panel_port)] %}<br/><span class="status-pill custom">Acceso de admin</span>{% endif %}
+					</td>
+					<td>{{ r.what }}</td>
+					<td>
+						<select name="policy_{{ loop.index }}" class="fw-policy" aria-label="Exposición de {{ r.port }}/{{ r.proto }}">
+							{% for key, label in policies.items() %}<option value="{{ key }}" {{ 'selected' if r.policy == key else '' }}>{{ label }}</option>{% endfor %}
+						</select>
+					</td>
+					<td>
+						<textarea name="allow_{{ loop.index }}" class="fw-allow" rows="2" style="min-width:200px; font-family:var(--font-mono); font-size:var(--fs-xs);" placeholder="Una IP o rango por línea" aria-label="IPs permitidas en {{ r.port }}/{{ r.proto }}">{{ r.allow|join('\n') }}</textarea>
+					</td>
+					<td><input type="text" name="note_{{ loop.index }}" value="{{ r.note }}" maxlength="120" style="min-width:120px;" aria-label="Nota"/></td>
+				</tr>
+				{% else %}
+				<tr><td colspan="5" class="htop-loading">No se detectaron puertos.</td></tr>
+				{% endfor %}
+				<tr class="fw-row">
+					<td>
+						<input type="number" name="port_new" min="1" max="65535" placeholder="Otro puerto" style="max-width:110px;" aria-label="Puerto nuevo"/>
+						<select name="proto_new" aria-label="Protocolo"><option value="tcp">TCP</option><option value="udp">UDP</option></select>
+					</td>
+					<td><span class="admin-hint">Puerto que no aparece arriba</span></td>
+					<td>
+						<select name="policy_new" class="fw-policy" aria-label="Exposición del puerto nuevo">
+							{% for key, label in policies.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}
+						</select>
+					</td>
+					<td><textarea name="allow_new" class="fw-allow" rows="2" style="min-width:200px; font-family:var(--font-mono); font-size:var(--fs-xs);" placeholder="Una IP o rango por línea" aria-label="IPs permitidas del puerto nuevo"></textarea></td>
+					<td><input type="text" name="note_new" maxlength="120" style="min-width:120px;" aria-label="Nota"/></td>
+				</tr>
+			</tbody>
+		</table>
 	</div>
-	<div class="field" style="margin-bottom:0;">
-		<label for="custom-proto">Protocolo</label>
-		<select id="custom-proto">
-			<option value="tcp">TCP</option>
-			<option value="udp">UDP</option>
-		</select>
-	</div>
-</div>
-<p style="margin-top:12px;">
-	<code class="fw-cmd" id="cmd-custom">sudo ufw allow &lt;puerto&gt;/tcp</code>
-	<button type="button" class="btn btn-secondary btn-sm fw-copy" data-target="cmd-custom">Copiar</button>
-</p>
+	<p class="admin-hint" style="margin:10px 0;">Al aplicar, los cambios entran en vigor en segundos pero quedan <strong>a prueba durante {{ confirm_seconds // 60 }} minutos</strong>: si te dejan sin acceso, no hagas nada y se revierten solos.</p>
+	<button type="submit" class="btn btn-primary" {{ 'disabled' if pending else '' }}>Aplicar a prueba</button>
+	{% if pending %}<span class="admin-hint">Confirma o descarta el cambio pendiente antes de hacer otro.</span>{% endif %}
+</form>
+
+{% if guard and guard.kernel %}
+<p class="admin-hint" style="margin-top:20px;">Conexiones rechazadas por reglas de puertos desde que se cargó la tabla: <strong>{{ '{:,}'.format(guard.kernel.port_drop_packets or 0) }}</strong> paquetes.</p>
+{% endif %}
+<p class="admin-hint">Mientras UFW siga activo, los servicios nativos del servidor (no Docker) necesitan además estar permitidos en UFW: marcar uno como "Público" aquí no lo abre si UFW lo bloquea.</p>
 
 {% endblock %}
 
 {% block scripts %}
 <script>
 (function () {
-	document.querySelectorAll('.fw-copy').forEach(function (btn) {
-		btn.addEventListener('click', function () {
-			const el = document.getElementById(btn.dataset.target);
-			const text = el.textContent;
-			navigator.clipboard.writeText(text).then(function () {
-				const original = btn.textContent;
-				btn.textContent = 'Copiado';
-				setTimeout(function () { btn.textContent = original; }, 1500);
-			}).catch(function () {
-				window.prompt('Copia manualmente:', text);
-			});
-		});
+	// Las IPs solo tienen sentido con "Solo IPs permitidas".
+	document.querySelectorAll('.fw-row').forEach(function (row) {
+		var sel = row.querySelector('.fw-policy');
+		var area = row.querySelector('.fw-allow');
+		if (!sel || !area) return;
+		function sync() { area.disabled = sel.value !== 'restricted'; area.style.opacity = area.disabled ? '0.45' : '1'; }
+		sel.addEventListener('change', sync);
+		sync();
 	});
-
-	const portInput = document.getElementById('custom-port');
-	const protoSelect = document.getElementById('custom-proto');
-	const cmdCustom = document.getElementById('cmd-custom');
-	function updateCustom() {
-		const port = portInput.value || '<puerto>';
-		cmdCustom.textContent = 'sudo ufw allow ' + port + '/' + protoSelect.value;
+	var box = document.getElementById('fw-pending');
+	if (box) {
+		var left = parseInt(box.dataset.seconds, 10);
+		var out = document.getElementById('fw-countdown');
+		var timer = setInterval(function () {
+			left -= 1;
+			if (out) out.textContent = Math.max(0, left);
+			if (left <= 0) { clearInterval(timer); setTimeout(function () { window.location.reload(); }, 3000); }
+		}, 1000);
 	}
-	portInput.addEventListener('input', updateCustom);
-	protoSelect.addEventListener('change', updateCustom);
 })();
 </script>
 {% endblock %}

@@ -9,16 +9,9 @@
 	<meta http-equiv="Pragma" content="no-cache"/>
 	<link rel="preconnect" href="https://fonts.googleapis.com"/>
 	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
-	<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"/>
+	<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap"/>
 	<link rel="stylesheet" href="/static/css/portal.css"/>
-	<script>
-		(function () {
-			try {
-				var saved = localStorage.getItem('panel-theme');
-				if (saved) document.documentElement.setAttribute('data-theme', saved);
-			} catch (e) {}
-		})();
-	</script>
+	{% include '_theme_init.html' %}
 </head>
 <body class="admin-shell">
 	<div class="admin-layout">
@@ -37,6 +30,7 @@
 				<a href="/admin/projects" class="{{ 'active' if request.path.startswith('/admin/projects') else '' }}">{{ icon_stack() }}<span>Proyectos</span></a>
 				<a href="/admin/files/" class="{{ 'active' if request.path.startswith('/admin/files') else '' }}">{{ icon_folder() }}<span>Archivos</span></a>
 				<a href="/admin/proxy" class="{{ 'active' if request.path.startswith('/admin/proxy') else '' }}">{{ icon_globe() }}<span>Proxy &amp; SSL</span></a>
+				<a href="/admin/security" class="{{ 'active' if request.path.startswith('/admin/security') else '' }}">{{ icon_shield() }}<span>Seguridad</span></a>
 				<a href="/admin/firewall" class="{{ 'active' if request.path.startswith('/admin/firewall') else '' }}">{{ icon_shield() }}<span>Firewall</span></a>
 				<a href="/admin/backups" class="{{ 'active' if request.path.startswith('/admin/backups') else '' }}">{{ icon_archive() }}<span>Backups</span></a>
 				<a href="/admin/resources" class="{{ 'active' if request.path.startswith('/admin/resources') else '' }}">{{ icon_cpu() }}<span>Recursos</span></a>
@@ -78,6 +72,12 @@
 			</main>
 		</div>
 	</div>
+	<div class="admin-busy-overlay" id="admin-busy-overlay" aria-hidden="true">
+		<div class="admin-busy-box">
+			<span class="admin-busy-spinner"></span>
+			<span>Procesando, un momento…</span>
+		</div>
+	</div>
 	{% block scripts %}{% endblock %}
 	<script>
 		window.addEventListener('pageshow', function (event) {
@@ -86,13 +86,15 @@
 
 		(function () {
 			var input = document.getElementById('theme-toggle-input');
-			var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+			var media = window.matchMedia('(prefers-color-scheme: dark)');
 
 			function current() {
 				var explicit = document.documentElement.getAttribute('data-theme');
-				return explicit || (prefersDark ? 'dark' : 'light');
+				return explicit || (media.matches ? 'dark' : 'light');
 			}
 			input.checked = current() === 'dark';
+			// Sin elección guardada, el switch sigue al tema del sistema.
+			media.addEventListener('change', function () { input.checked = current() === 'dark'; });
 			input.addEventListener('change', function () {
 				var next = input.checked ? 'dark' : 'light';
 				document.documentElement.setAttribute('data-theme', next);
@@ -106,6 +108,40 @@
 			toggle.addEventListener('click', function () {
 				var open = sidebar.classList.toggle('nav-open');
 				toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+			});
+		})();
+
+		// Al enviar cualquier formulario del panel, bloqueamos todos los
+		// botones y mostramos un loader hasta que la respuesta llegue (o la
+		// página navegue). Evita que se puedan disparar acciones nuevas
+		// mientras una operación lenta (Docker, backups, git, etc.) termina.
+		(function () {
+			var overlay = document.getElementById('admin-busy-overlay');
+
+			document.addEventListener('submit', function (event) {
+				if (event.defaultPrevented) { return; }
+
+				var submitter = event.submitter || null;
+
+				document.querySelectorAll('button, a.btn, input[type="submit"], input[type="button"]').forEach(function (el) {
+					if (el.tagName === 'A') {
+						el.classList.add('is-disabled');
+						el.setAttribute('aria-disabled', 'true');
+						el.addEventListener('click', function (e) { e.preventDefault(); }, { once: true });
+					} else {
+						el.disabled = true;
+					}
+				});
+
+				if (submitter) { submitter.classList.add('is-loading'); }
+
+				overlay.classList.add('is-active');
+				overlay.setAttribute('aria-hidden', 'false');
+			}, true);
+
+			window.addEventListener('pageshow', function () {
+				overlay.classList.remove('is-active');
+				overlay.setAttribute('aria-hidden', 'true');
 			});
 		})();
 	</script>

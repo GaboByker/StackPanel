@@ -26,12 +26,12 @@
 		{% if project.url %}<a class="btn btn-secondary btn-sm" href="{{ project.url }}" target="_blank" rel="noopener">{{ icon_arrow_up_right(cls='icon icon-sm') }} Abrir</a>{% endif %}
 		{% if containers %}
 			{% if docker_status and docker_status.running %}
-			<form method="post" action="/admin/projects/{{ project.id }}/stop" style="display:inline;" onsubmit="return confirm('¿Detener {{ project.name }}?');">
+			<form method="post" action="/admin/projects/{{ project.id }}/stop" class="inline-form" onsubmit="return confirm('¿Detener {{ project.name }}?');">
 				<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
 				<button type="submit" class="btn btn-danger btn-sm">Detener</button>
 			</form>
 			{% else %}
-			<form method="post" action="/admin/projects/{{ project.id }}/start" style="display:inline;">
+			<form method="post" action="/admin/projects/{{ project.id }}/start" class="inline-form">
 				<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
 				<button type="submit" class="btn btn-primary btn-sm">Iniciar</button>
 			</form>
@@ -86,6 +86,7 @@
 				<a class="btn btn-secondary btn-sm" href="/admin/files/{{ project.folder[5:] if project.folder.startswith('html/') else project.folder }}">Archivos</a>
 				{% endif %}
 				{% if has_env %}<a class="btn btn-secondary btn-sm" href="/admin/projects/{{ project.id }}/env">Variables de entorno</a>{% endif %}
+				{% if has_php_config %}<a class="btn btn-secondary btn-sm" href="/admin/projects/{{ project.id }}/php-config">Configuración PHP</a>{% endif %}
 			</div>
 		</section>
 
@@ -225,11 +226,11 @@
 					</div>
 					<div class="admin-actions" style="margin:0;">
 						<a class="btn btn-primary btn-sm" href="/admin/projects/{{ project.id }}/database/{{ db.id }}/view">Explorar</a>
-						<form method="post" action="/admin/projects/{{ project.id }}/database/{{ db.id }}/toggle-write" style="display:inline;">
+						<form method="post" action="/admin/projects/{{ project.id }}/database/{{ db.id }}/toggle-write" class="inline-form">
 							<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
 							<button type="submit" class="btn btn-secondary btn-sm">{{ 'Bloquear escritura' if db.allow_write else 'Permitir escritura' }}</button>
 						</form>
-						<form method="post" action="/admin/projects/{{ project.id }}/database/{{ db.id }}/delete" style="display:inline;" onsubmit="return confirm('¿Quitar esta conexión?');">
+						<form method="post" action="/admin/projects/{{ project.id }}/database/{{ db.id }}/delete" class="inline-form" onsubmit="return confirm('¿Quitar esta conexión?');">
 							<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
 							<button type="submit" class="btn btn-danger btn-sm">Quitar</button>
 						</form>
@@ -257,16 +258,16 @@
 						<span class="status-pill {{ 'running' if u.allow_write else 'stopped' }}" style="margin-left:6px;">{{ 'Escritura' if u.allow_write else 'Solo lectura' }}</span>
 					</div>
 					<div class="admin-actions" style="margin:0;">
-						<form method="post" action="/admin/projects/{{ project.id }}/sftp/{{ u.id }}/toggle-write" style="display:inline;">
+						<form method="post" action="/admin/projects/{{ project.id }}/sftp/{{ u.id }}/toggle-write" class="inline-form">
 							<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
 							<button type="submit" class="btn btn-secondary btn-sm">{{ 'Bloquear escritura' if u.allow_write else 'Permitir escritura' }}</button>
 						</form>
-						<form method="post" action="/admin/projects/{{ project.id }}/sftp/{{ u.id }}/reset-password" class="sftp-reset-form" style="display:inline;">
+						<form method="post" action="/admin/projects/{{ project.id }}/sftp/{{ u.id }}/reset-password" class="sftp-reset-form inline-form">
 							<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
 							<input type="hidden" name="password" value=""/>
 							<button type="submit" class="btn btn-secondary btn-sm">Restablecer contraseña</button>
 						</form>
-						<form method="post" action="/admin/projects/{{ project.id }}/sftp/{{ u.id }}/delete" style="display:inline;" onsubmit="return confirm('¿Quitar el acceso SFTP de \'{{ u.username }}\'?');">
+						<form method="post" action="/admin/projects/{{ project.id }}/sftp/{{ u.id }}/delete" class="inline-form" onsubmit="return confirm('¿Quitar el acceso SFTP de \'{{ u.username }}\'?');">
 							<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
 							<button type="submit" class="btn btn-danger btn-sm">Quitar</button>
 						</form>

@@ -3,3 +3,5 @@ __pycache__/
 *.pyc
 instance/
 .env
+# Grafo de código generado localmente (contiene rutas de esta máquina)
+graphify-out/

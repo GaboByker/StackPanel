@@ -13,9 +13,16 @@
 	<button type="submit" class="btn btn-danger">Desactivar 2FA</button>
 </form>
 {% elif secret %}
-<p class="admin-hint">Escanea esto con Google Authenticator, Authy o similar (o ingresa la clave manualmente), luego confirma con el código de 6 dígitos.</p>
-<p><strong>Clave manual:</strong> <code>{{ secret }}</code></p>
-<p><strong>URI:</strong> <code style="word-break:break-all;">{{ otpauth_uri }}</code></p>
+<p class="admin-hint">1. Abre Google Authenticator, Microsoft Authenticator, Authy o similar y escanea este código QR.</p>
+{% if qr_svg %}
+<div style="display:inline-block; background:#ffffff; padding:8px; border-radius:8px; border:1px solid var(--border); margin-bottom:12px; line-height:0;" aria-label="Código QR para la app autenticadora">{{ qr_svg|safe }}</div>
+{% endif %}
+<details style="margin-bottom:16px;">
+	<summary class="admin-hint" style="cursor:pointer;">¿No puedes escanear? Escribe la clave a mano</summary>
+	<p style="margin-top:8px;"><strong>Clave:</strong> <code style="word-break:break-all;">{{ secret }}</code></p>
+	<p class="admin-hint">En la app elige "Ingresar clave de configuración", pega la clave y deja el tipo "Basada en el tiempo".</p>
+</details>
+<p class="admin-hint">2. Escribe el código de 6 dígitos que muestra la app para confirmar.</p>
 <form method="post" style="max-width:320px;">
 	<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
 	<input type="hidden" name="action" value="confirm"/>

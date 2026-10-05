@@ -110,12 +110,12 @@
 		<div class="admin-actions">
 			<a class="btn btn-secondary btn-sm" href="{{ p.url }}" target="_blank" rel="noopener">{{ icon_arrow_up_right(cls='icon icon-sm') }} Abrir</a>
 			{% if p.docker_status.running %}
-			<form method="post" action="/admin/projects/{{ p.db_id }}/stop" style="display:inline;" onsubmit="return confirm('¿Detener {{ p.name }}?');">
+			<form method="post" action="/admin/projects/{{ p.db_id }}/stop" class="inline-form" onsubmit="return confirm('¿Detener {{ p.name }}?');">
 				<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
 				<button type="submit" class="btn btn-danger btn-sm">Detener</button>
 			</form>
 			{% else %}
-			<form method="post" action="/admin/projects/{{ p.db_id }}/start" style="display:inline;">
+			<form method="post" action="/admin/projects/{{ p.db_id }}/start" class="inline-form">
 				<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
 				<button type="submit" class="btn btn-primary btn-sm">Iniciar</button>
 			</form>

@@ -6,117 +6,26 @@ import struct
 import urllib.error
 import urllib.request
 
-DOCKER_SOCK = os.environ.get('DOCKER_SOCK', '/var/run/docker.sock')
+import site_presets
 
+DOCKER_SOCK = os.environ.get('DOCKER_SOCK', '/var/run/docker.sock')
+# Nombres de los contenedores del proxy. El docker-compose.yml del instalador
+# los llama stackpanel-proxy / stackpanel-certbot y los define por entorno.
+PROXY_CONTAINER = os.environ.get('PROXY_CONTAINER', 'proxy')
+CERTBOT_CONTAINER = os.environ.get('CERTBOT_CONTAINER', 'proxy-certbot')
+# Servicios que el panel gestiona fijos: el proxy (en toda instalación) y,
+# si existe, los propios de este servidor en instance/site_presets.json
+# (ver site_presets.py; el repositorio no lleva datos de ningún servidor).
 MANAGED_SERVICES = {
-    'social-hub': {
-        'containers': ['social-hub'],
-        'label': 'Social Hub',
-        'database': 'html/social-hub/instance/hub.db',
-        'port': 5000,
-        'health_path': '/login.html',
-    },
-    'empires': {
-        'containers': ['empires-allies'],
-        'label': 'Empires & Allies',
-        'database': 'html/Empires-Allies/instance/save.db',
-        'port': 5006,
-        'health_path': '/',
-    },
-    'social-empires': {
-        'containers': ['social-empires'],
-        'label': 'Social Empires',
-        'database': 'html/social-empires/saves',
-        'port': 5051,
-        'health_path': '/',
-    },
-    'torres': {
-        'containers': ['torres-db', 'torres-arquitectura'],
-        'label': 'Torres Arquitectura (WordPress)',
-        'database': 'html/torres-arquitectura/db-data + wp-content',
-        'port': 5007,
-        'health_path': '/',
-        'start_order': ['torres-db', 'torres-arquitectura'],
-        'stop_order': ['torres-arquitectura', 'torres-db'],
-    },
-    'finanzas': {
-        'containers': ['finanzas-personales'],
-        'label': 'Finanzas Personales',
-        'database': 'html/finanzas-personales/instance/finanzas.db',
-        'port': 5050,
-        'health_path': '/',
-    },
-    'contactos': {
-        'containers': ['limpieza-contactos'],
-        'label': 'Limpieza de Contactos',
-        'database': 'html/limpieza-contactos/instance',
-        'port': 5052,
-        'health_path': '/',
-    },
-    'wapicenter': {
-        'containers': [
-            'wapicenter-postgres',
-            'wapicenter-redis',
-            'wapicenter-api',
-            'wapicenter-frontend',
-        ],
-        'container_prefixes': ['wapicenter-worker'],
-        'compose_project': 'wapicenter',
-        'label': 'WApiCenter',
-        'database': 'html/WApiCenter (volumen postgres_data)',
-        'port': 8090,
-        'health_path': '/',
-        'start_order': [
-            'wapicenter-postgres',
-            'wapicenter-redis',
-            'wapicenter-api',
-        ],
-        'stop_order': [
-            'wapicenter-frontend',
-            'wapicenter-api',
-            'wapicenter-redis',
-            'wapicenter-postgres',
-        ],
-    },
-    'gemma4': {
-        'containers': ['gemma4-ollama', 'gemma4-api-manager'],
-        'label': 'API Manager IA',
-        'database': 'html/gemma4-api-manager/data/gemma4_manager.db',
-        'port': 8070,
-        'health_path': '/health',
-        'start_order': ['gemma4-ollama', 'gemma4-api-manager'],
-        'stop_order': ['gemma4-api-manager', 'gemma4-ollama'],
-    },
+    **site_presets.get('managed_services', {}),
     'proxy': {
-        'containers': ['proxy', 'proxy-certbot'],
+        'containers': [PROXY_CONTAINER, CERTBOT_CONTAINER],
         'label': 'Proxy Nginx (dominios + SSL)',
-        'database': 'proxy/sites (config), volumen proxy-certbot-etc (certificados)',
+        'database': 'proxy/sites (config), volumen de certbot (certificados)',
         'port': None,
         'health_path': '/',
-        'start_order': ['proxy-certbot', 'proxy'],
-        'stop_order': ['proxy', 'proxy-certbot'],
-    },
-    'wanqara-dashboard': {
-        'containers': [
-            'wanqara-dashboard-db-1',
-            'wanqara-dashboard-backend-1',
-            'wanqara-dashboard-frontend-1',
-        ],
-        'compose_project': 'wanqara-dashboard',
-        'label': 'Wanqara Dashboard',
-        'database': 'html/wanqara-dashboard (volumen db_data + upload_data)',
-        'port': 5173,
-        'health_path': '/',
-        'start_order': [
-            'wanqara-dashboard-db-1',
-            'wanqara-dashboard-backend-1',
-            'wanqara-dashboard-frontend-1',
-        ],
-        'stop_order': [
-            'wanqara-dashboard-frontend-1',
-            'wanqara-dashboard-backend-1',
-            'wanqara-dashboard-db-1',
-        ],
+        'start_order': [CERTBOT_CONTAINER, PROXY_CONTAINER],
+        'stop_order': [PROXY_CONTAINER, CERTBOT_CONTAINER],
     },
 }
 
@@ -481,6 +390,26 @@ def list_all_containers():
             'labels': item.get('Labels') or {},
             'host_ports': host_ports,
         })
+    return result, ''
+
+
+def list_published_ports():
+    """Puertos publicados al host por contenedores en marcha:
+    [{port, proto, container}]. Para la pantalla de exposición del firewall."""
+    data, err = _docker_request('GET', '/containers/json')
+    if err or data is None:
+        return [], err
+    seen, result = set(), []
+    for item in data:
+        name = ((item.get('Names') or ['/'])[0]).lstrip('/')
+        for p in item.get('Ports') or []:
+            if not p.get('PublicPort'):
+                continue
+            key = (p['PublicPort'], p.get('Type') or 'tcp')
+            if key in seen:
+                continue
+            seen.add(key)
+            result.append({'port': key[0], 'proto': key[1], 'container': name})
     return result, ''
 
 

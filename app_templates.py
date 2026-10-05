@@ -3,7 +3,9 @@
 editable desde el explorador y respaldable como cualquier otro proyecto."""
 import os
 import secrets
+import time
 
+import docker_control
 import docker_ops
 
 TEMPLATES = {
@@ -28,6 +30,105 @@ TEMPLATES = {
         'default_container_port': 3000,
     },
 }
+
+
+PHP_INI_RELATIVE = os.path.join('php-config', 'zz-panel.ini')
+PHP_INI_CONTAINER_PATH = '/usr/local/etc/php/conf.d/zz-panel.ini'
+DEFAULT_PHP_CONFIG = {
+    'upload_max_filesize': '64M',
+    'post_max_size': '64M',
+    'memory_limit': '256M',
+    'max_execution_time': '300',
+    'max_input_vars': '3000',
+}
+
+
+def _php_ini_local_path(local_folder):
+    return os.path.join(local_folder, PHP_INI_RELATIVE)
+
+
+def _php_ini_host_path(host_folder):
+    return f"{host_folder}/{PHP_INI_RELATIVE.replace(os.sep, '/')}"
+
+
+def read_php_config(local_folder):
+    values = dict(DEFAULT_PHP_CONFIG)
+    path = _php_ini_local_path(local_folder)
+    if os.path.isfile(path):
+        with open(path, encoding='utf-8') as fh:
+            for line in fh:
+                line = line.strip()
+                if not line or line.startswith(';') or '=' not in line:
+                    continue
+                key, val = line.split('=', 1)
+                key = key.strip()
+                if key in values:
+                    values[key] = val.strip()
+    return values
+
+
+def write_php_config(local_folder, values):
+    path = _php_ini_local_path(local_folder)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    lines = [f'{key} = {(values.get(key) or "").strip() or default}' for key, default in DEFAULT_PHP_CONFIG.items()]
+    with open(path, 'w', encoding='utf-8') as fh:
+        fh.write('\n'.join(lines) + '\n')
+
+
+def ensure_php_override_mount(app_container, local_folder, host_folder):
+    """Se asegura de que el contenedor tenga montado el .ini de overrides.
+    Los sitios instalados antes de que existiera esta función no lo tienen,
+    así que hay que recrear el contenedor agregándolo (sin tocar wp-content
+    ni la base, que viven en sus propios binds). Devuelve (ok, err, recreado)."""
+    if not os.path.isfile(_php_ini_local_path(local_folder)):
+        write_php_config(local_folder, DEFAULT_PHP_CONFIG)
+
+    info = docker_ops.inspect_container(app_container)
+    if not info:
+        return False, 'No se encontró el contenedor de la aplicación.', False
+
+    bind_entry = f'{_php_ini_host_path(host_folder)}:{PHP_INI_CONTAINER_PATH}'
+    if any(b.split(':', 1)[-1] == PHP_INI_CONTAINER_PATH for b in info['binds']):
+        return True, '', False
+
+    binds = info['binds'] + [bind_entry]
+    _, err = docker_ops.create_container(
+        app_container, info['image'], env=info['env'], ports=info['ports'],
+        binds=binds, network=info['network'],
+    )
+    if err:
+        return False, err, False
+    return True, '', True
+
+
+def save_php_config(app_container, local_folder, host_folder, values):
+    write_php_config(local_folder, values)
+    ok, err, recreated = ensure_php_override_mount(app_container, local_folder, host_folder)
+    if not ok:
+        return False, err
+    if not recreated:
+        # El bind ya estaba montado: PHP solo relee el .ini al arrancar,
+        # así que hace falta un restart para que tome los valores nuevos.
+        ok, msg = docker_control.stop_containers([app_container])
+        if not ok:
+            return False, msg
+        ok, msg = docker_control.start_containers([app_container])
+        if not ok:
+            return False, msg
+    return True, ''
+
+
+def _wait_mysql_ready(container, attempts=30, delay=1):
+    """MariaDB hace un primer arranque interno para crear la base/usuario
+    antes de quedar lista; si WordPress arranca y alguien entra al sitio en
+    esa ventana, ve 'Error establishing a database connection'. Se espera
+    a que el propio healthcheck de la imagen confirme que ya puede
+    atender conexiones reales."""
+    for _ in range(attempts):
+        if docker_ops.exec_run(container, ['healthcheck.sh', '--connect', '--innodb_initialized']) == 0:
+            return True
+        time.sleep(delay)
+    return False
 
 
 def pick_free_port(used_ports, start=20000, end=20999):
@@ -65,18 +166,26 @@ def _install_wordpress(slug, local_folder, host_folder, port, saved_secrets):
     app_container = f'{slug}-app'
     db_password = saved_secrets.get('db_password') or secrets.token_hex(12)
     root_password = saved_secrets.get('root_password') or secrets.token_hex(12)
+    # Tag sin versión fija: Docker Hub lo actualiza a la última WordPress
+    # estable para PHP 8.2, así los sitios nuevos no nacen desactualizados.
+    wp_image = 'wordpress:php8.2-apache'
 
     os.makedirs(os.path.join(local_folder, 'db-data'), exist_ok=True)
     os.makedirs(os.path.join(local_folder, 'wp-content'), exist_ok=True)
 
-    for step in (
-        lambda: docker_ops.ensure_network(network),
-        lambda: docker_ops.ensure_image('mariadb:11'),
-        lambda: docker_ops.ensure_image('wordpress:6.7-php8.2-apache'),
-    ):
-        ok, err = step()
-        if not ok:
-            return None, None, None, err
+    ok, err = docker_ops.ensure_network(network)
+    if not ok:
+        return None, None, None, err
+    ok, err = docker_ops.ensure_image('mariadb:11')
+    if not ok:
+        return None, None, None, err
+    # A diferencia de ensure_image (que reusa la imagen si ya existe en el
+    # host), acá forzamos el pull para traer la versión vigente aunque haya
+    # quedado una imagen vieja cacheada de una instalación anterior. Si no
+    # hay red pero ya hay una imagen local, seguimos con esa.
+    ok, err = docker_ops.pull_image(wp_image)
+    if not ok and not docker_ops.image_exists(wp_image):
+        return None, None, None, err
 
     secrets_out = {'db_password': db_password, 'root_password': root_password}
 
@@ -94,20 +203,34 @@ def _install_wordpress(slug, local_folder, host_folder, port, saved_secrets):
     if err:
         return None, None, None, err
 
+    if not _wait_mysql_ready(db_container):
+        return None, None, None, 'MariaDB no respondió a tiempo al iniciar. Intenta instalar de nuevo.'
+
+    write_php_config(local_folder, DEFAULT_PHP_CONFIG)
+
     _, err = docker_ops.create_container(
-        app_container, 'wordpress:6.7-php8.2-apache',
+        app_container, wp_image,
         env={
             'WORDPRESS_DB_HOST': db_container,
             'WORDPRESS_DB_USER': 'wordpress',
             'WORDPRESS_DB_PASSWORD': db_password,
             'WORDPRESS_DB_NAME': 'wordpress',
         },
-        binds=[f'{host_folder}/wp-content:/var/www/html/wp-content'],
+        binds=[
+            f'{host_folder}/wp-content:/var/www/html/wp-content',
+            f'{_php_ini_host_path(host_folder)}:{PHP_INI_CONTAINER_PATH}',
+        ],
         ports={'80/tcp': port},
         network=network,
     )
     if err:
         return None, None, None, err
+
+    # El panel necesita poder alcanzar la base de este sitio para poder
+    # detectarla/explorarla (cada sitio vive en su propia red aislada para
+    # que no se vean entre sí). Best-effort: si falla, el sitio funciona
+    # igual, solo no se podrá auto-detectar la conexión desde el panel.
+    docker_ops.connect_network(network, os.environ.get('HOSTNAME'))
 
     return [db_container, app_container], [], secrets_out, None
 

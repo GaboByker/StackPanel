@@ -9,6 +9,9 @@
 #   STACKPANEL_DIR     directorio de instalación (default: ~/stackpanel)
 #   STACKPANEL_BRANCH  rama a instalar (default: main)
 #   PORTAL_PORT         puerto del panel si no querés que se elija solo
+#   STACKPANEL_GUARD    0 = no instalar el agente de firewall (stackpanel-guard)
+#   STACKPANEL_SRC      carpeta local con el código, en vez de descargarlo
+#                       (para probar cambios antes de publicarlos)
 set -euo pipefail
 
 REPO="GaboByker/StackPanel"
@@ -47,12 +50,17 @@ fi
 TMP_DIR=$(mktemp -d)
 trap 'rm -rf "${TMP_DIR}"' EXIT
 
-echo "==> Descargando código (${BRANCH})..."
-curl -fsSL "https://github.com/${REPO}/archive/refs/heads/${BRANCH}.tar.gz" -o "${TMP_DIR}/stackpanel.tar.gz"
-tar -xzf "${TMP_DIR}/stackpanel.tar.gz" -C "${TMP_DIR}"
-
 mkdir -p "${INSTALL_DIR}"
-cp -a "${TMP_DIR}/${REPO#*/}-${BRANCH}/." "${INSTALL_DIR}/"
+if [ -n "${STACKPANEL_SRC:-}" ]; then
+    echo "==> Copiando código desde ${STACKPANEL_SRC}..."
+    tar -C "${STACKPANEL_SRC}" --exclude=./.git --exclude=./.venv --exclude=./instance \
+        --exclude=./.env --exclude=./__pycache__ --exclude=./graphify-out -cf - . | tar -C "${INSTALL_DIR}" -xf -
+else
+    echo "==> Descargando código (${BRANCH})..."
+    curl -fsSL "https://github.com/${REPO}/archive/refs/heads/${BRANCH}.tar.gz" -o "${TMP_DIR}/stackpanel.tar.gz"
+    tar -xzf "${TMP_DIR}/stackpanel.tar.gz" -C "${TMP_DIR}"
+    cp -a "${TMP_DIR}/${REPO#*/}-${BRANCH}/." "${INSTALL_DIR}/"
+fi
 
 cd "${INSTALL_DIR}"
 
@@ -137,6 +145,33 @@ else
     docker compose up -d --build
 fi
 
+# Agente de firewall (stackpanel-guard): lleva los bloqueos y las reglas de
+# puertos del panel al kernel (nftables), vigila SSH/SFTP/nginx y cubre los
+# puertos de Docker, que UFW no ve. Necesita root: se instala con sudo.
+# La IP desde la que se instala (sesión SSH) entra a su lista blanca de
+# emergencia, para no quedarse fuera del servidor.
+GUARD_STATUS="no instalado"
+if [ "${STACKPANEL_GUARD:-1}" != "0" ]; then
+    ADMIN_IP="${SSH_CLIENT:-}"; ADMIN_IP="${ADMIN_IP%% *}"
+    GUARD_ARGS=("${INSTALL_DIR}/instance/portal.db")
+    [ -n "${ADMIN_IP}" ] && GUARD_ARGS+=("${ADMIN_IP}")
+    if [ "$(id -u)" = "0" ]; then
+        SUDO=""
+    else
+        SUDO="sudo"
+        echo "==> Instalando el agente de firewall (stackpanel-guard): puede pedirte tu contraseña de sudo."
+    fi
+    if ${SUDO} bash "${INSTALL_DIR}/guard/install-guard.sh" "${GUARD_ARGS[@]}" >/dev/null; then
+        GUARD_STATUS="activo"
+        [ -n "${ADMIN_IP}" ] && GUARD_STATUS="activo (tu IP ${ADMIN_IP} quedó en la lista de emergencia)"
+    else
+        GUARD_STATUS="no se pudo instalar"
+        echo "==> No se pudo instalar stackpanel-guard. El panel funciona igual, pero los bloqueos" >&2
+        echo "    y las reglas de puertos no se aplicarán en el servidor hasta que corras:" >&2
+        echo "        cd ${INSTALL_DIR} && sudo ./guard/install-guard.sh ${GUARD_ARGS[*]}" >&2
+    fi
+fi
+
 PUBLIC_HOST=$(grep '^PUBLIC_HOST=' .env | cut -d= -f2-)
 
 cat <<MSG
@@ -148,6 +183,10 @@ Abrí en tu navegador:
     http://${PUBLIC_HOST}:${PORT}/setup
 
 La primera vez te va a pedir crear el usuario administrador.
+
+Firewall del servidor (stackpanel-guard): ${GUARD_STATUS}
+    sudo stackpanel-guard status                  # estado del agente
+    sudo touch /etc/stackpanel-guard/disabled     # emergencia: quita todos los bloqueos
 
 Comandos útiles (desde ${INSTALL_DIR}):
     docker compose logs -f portal   # ver logs

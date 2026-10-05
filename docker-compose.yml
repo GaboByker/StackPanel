@@ -15,8 +15,14 @@ services:
       HOST_STACK_ROOT: ${STACK_ROOT:?definí STACK_ROOT en .env}
       PORTAL_MAX_UPLOAD_MB: ${PORTAL_MAX_UPLOAD_MB:-512}
       SFTP_PORT: ${SFTP_PORT:-2222}
+      PROXY_CONTAINER: stackpanel-proxy
+      CERTBOT_CONTAINER: stackpanel-certbot
+      CERTBOT_EMAIL: ${CERTBOT_EMAIL:-}
+      PORTAL_COOKIE_SECURE: ${PORTAL_COOKIE_SECURE:-0}
+      PORTAL_TRUSTED_PROXIES: ${PORTAL_TRUSTED_PROXIES:-}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - /run/stackpanel-guard:/run/stackpanel-guard
       - ${STACK_ROOT:?definí STACK_ROOT en .env}:/stack:ro
       - ./instance:/app/instance
       - ./proxy/sites:/app/proxy-sites

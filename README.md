@@ -13,7 +13,8 @@ Un panel de administración autoalojado (self-hosted) para gestionar múltiples 
 - **Explorador de archivos** por proyecto
 - **Accesos SFTP por proyecto**: usuarios aislados (chroot, uno no ve la carpeta del otro) con lectura/escritura configurable, sin tocar código ni `docker-compose.yml`
 - **Notificaciones**: alertas a Discord/Slack/Email configurables por el propio admin
-- **Seguridad**: autenticación de administradores con 2FA (TOTP), gestión de admins, auditoría, firewall
+- **Seguridad**: administradores con 2FA (TOTP, con código QR), gestión de admins y auditoría; bloqueo automático de IPs por intentos fallidos (login del panel, SSH, SFTP y escaneos web), lista blanca, bloqueos manuales, gráfico de ataques
+- **Firewall**: decide quién entra a cada puerto (público, solo ciertas IPs o cerrado), incluidos los que publica Docker y que UFW no ve. Cada cambio queda a prueba 2 minutos y se revierte solo si no lo confirmás
 - **Grafos de código**: integración con Graphify para visualizar la estructura de cada proyecto desde el panel
 
 ## Stack
@@ -46,6 +47,19 @@ Para instalar en otra carpeta o rama:
 ```bash
 STACKPANEL_DIR=/otra/ruta STACKPANEL_BRANCH=main curl -fsSL https://raw.githubusercontent.com/GaboByker/StackPanel/main/install.sh | bash
 ```
+
+### Firewall del servidor (stackpanel-guard)
+
+El panel corre en Docker y no tiene permisos sobre la red. Los bloqueos y las reglas de puertos los aplica un agente pequeño en el host, `stackpanel-guard` (servicio de systemd, Python sin dependencias, nftables). El instalador lo instala solo, con `sudo`. Si no pudo, corré desde la carpeta del panel:
+
+```bash
+sudo ./guard/install-guard.sh "$PWD/instance/portal.db" TU.IP.DE.CONFIANZA
+```
+
+- Usa su propia tabla `inet stackpanel` y convive con UFW y fail2ban.
+- `/etc/stackpanel-guard/allow.conf`: lista blanca de emergencia que el panel no puede tocar (una IP o rango por línea).
+- Emergencia: `sudo touch /etc/stackpanel-guard/disabled` quita todos los bloqueos del servidor (y sigue así tras reiniciar) hasta borrar ese archivo.
+- Estado y logs: `sudo stackpanel-guard status`, `sudo stackpanel-guard show`, `journalctl -u stackpanel-guard`.
 
 ### Actualizar o apagar
 

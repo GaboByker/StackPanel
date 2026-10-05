@@ -5,7 +5,7 @@ import os
 import re
 import struct
 
-from docker_control import DOCKER_SOCK, _DockerSocketConnection
+from docker_control import CERTBOT_CONTAINER, DOCKER_SOCK, PROXY_CONTAINER, _DockerSocketConnection
 
 DOMAIN_FILE_RE = re.compile(r'^[a-zA-Z0-9.-]+$')
 
@@ -69,12 +69,12 @@ def docker_exec(container, cmd, timeout=90):
     return exit_code, output
 
 
-def nginx_test(container='proxy'):
+def nginx_test(container=PROXY_CONTAINER):
     code, out = docker_exec(container, ['nginx', '-t'])
     return code == 0, out
 
 
-def nginx_reload(container='proxy'):
+def nginx_reload(container=PROXY_CONTAINER):
     code, out = docker_exec(container, ['nginx', '-s', 'reload'])
     return code == 0, out
 
@@ -147,7 +147,7 @@ def render_site_conf(domain, target_host, target_port, ssl_ready):
     )
 
 
-def apply_site(sites_dir, domain, target_host, target_port, ssl_ready, proxy_container='proxy'):
+def apply_site(sites_dir, domain, target_host, target_port, ssl_ready, proxy_container=PROXY_CONTAINER):
     path = os.path.join(sites_dir, _site_filename(domain))
     previous = None
     if os.path.isfile(path):
@@ -173,18 +173,20 @@ def apply_site(sites_dir, domain, target_host, target_port, ssl_ready, proxy_con
     return True, ''
 
 
-def remove_site(sites_dir, domain, proxy_container='proxy'):
+def remove_site(sites_dir, domain, proxy_container=PROXY_CONTAINER):
     path = os.path.join(sites_dir, _site_filename(domain))
     if os.path.isfile(path):
         os.remove(path)
     return nginx_reload(proxy_container)
 
 
-def issue_certificate(domain, email, certbot_container='proxy-certbot'):
+def issue_certificate(domain, email, certbot_container=CERTBOT_CONTAINER):
     cmd = [
         'certbot', 'certonly', '--webroot', '-w', '/var/www/certbot',
-        '-d', domain, '--email', email, '--agree-tos', '--no-eff-email',
-        '--non-interactive',
+        '-d', domain, '--agree-tos', '--no-eff-email', '--non-interactive',
     ]
+    # Sin correo configurado Let's Encrypt igual emite, solo que no avisa
+    # por mail antes de que venza (el panel ya avisa por su cuenta).
+    cmd += ['--email', email] if email else ['--register-unsafely-without-email']
     code, out = docker_exec(certbot_container, cmd, timeout=120)
     return code == 0, out

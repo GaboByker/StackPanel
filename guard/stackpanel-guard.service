@@ -1,0 +1,43 @@
+[Unit]
+Description=StackPanel guard (bloqueos del panel -> nftables)
+Documentation=file:///usr/local/lib/stackpanel-guard/stackpanel_guard.py
+After=local-fs.target network-pre.target
+Wants=network-pre.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /usr/local/lib/stackpanel-guard/stackpanel_guard.py run
+Restart=always
+RestartSec=3
+
+# El socket vive en /run/stackpanel-guard; se conserva entre reinicios del
+# servicio para que el bind-mount del contenedor del panel siga siendo válido.
+RuntimeDirectory=stackpanel-guard
+RuntimeDirectoryMode=0750
+RuntimeDirectoryPreserve=yes
+# Posición de lectura de cada log (para no perder ni repetir líneas).
+StateDirectory=stackpanel-guard
+
+# Solo lo necesario: administrar nftables, leer logs (journald y Docker) y
+# escribir en la base del panel los intentos y bloqueos detectados. La
+# carpeta de la base se habilita con un drop-in que crea install-guard.sh.
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_DAC_READ_SEARCH
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/run/stackpanel-guard
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_UNIX AF_NETLINK
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

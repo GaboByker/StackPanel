@@ -3,10 +3,12 @@ varias formas de conectar (host.docker.internal con el puerto publicado, o
 el nombre del servicio/contenedor de su docker-compose.yml) hasta encontrar
 una que funcione de verdad. Así, agregar la conexión en "Bases de datos" es
 un solo clic, sin tener que ir a buscar las credenciales a mano."""
+import json
 import os
 import re
 
 import db_viewer
+import docker_ops
 
 # (engine, usuario, password, nombre_bd, puerto, puerto_por_defecto)
 _ENV_PATTERNS = [
@@ -14,6 +16,38 @@ _ENV_PATTERNS = [
     ('mysql', 'MYSQL_USER', 'MYSQL_PASSWORD', 'MYSQL_DATABASE', 'MYSQL_PORT', 3306),
     ('mysql', 'MARIADB_USER', 'MARIADB_PASSWORD', 'MARIADB_DATABASE', 'MARIADB_PORT', 3306),
 ]
+
+# Apps instaladas con el instalador de 1 clic del panel: no tienen .env (las
+# credenciales se pasan directo como variables del contenedor), pero como el
+# panel las generó, ya sabemos exactamente cómo conectarnos.
+_TEMPLATE_CONVENTIONS = {
+    'wordpress': lambda slug, secrets: {
+        'engine': 'mysql',
+        'host': f'{slug}-db',
+        'port': 3306,
+        'username': 'wordpress',
+        'password': secrets.get('db_password', ''),
+        'dbname': 'wordpress',
+    },
+}
+
+
+def detect_from_template(project):
+    template = (project or {}).get('template')
+    builder = _TEMPLATE_CONVENTIONS.get(template)
+    slug = (project or {}).get('project_key')
+    if not builder or not slug:
+        return None
+    try:
+        project_secrets = json.loads(project.get('secrets') or '{}')
+    except (TypeError, ValueError):
+        project_secrets = {}
+    candidate = builder(slug, project_secrets)
+    # Cada sitio vive en su propia red de Docker aislada de los demás; el
+    # panel necesita unirse a esa red para poder alcanzar la base. Si ya
+    # está conectado (instalaciones nuevas) esto no hace nada.
+    docker_ops.connect_network(f'{slug}-net', os.environ.get('HOSTNAME'))
+    return candidate
 
 
 def _read_env(folder):
@@ -77,8 +111,12 @@ def detect_candidates(folder):
     return candidates
 
 
-def autodetect(folder):
-    candidates = detect_candidates(folder)
+def autodetect(folder, project=None):
+    candidates = []
+    template_candidate = detect_from_template(project)
+    if template_candidate:
+        candidates.append(template_candidate)
+    candidates += detect_candidates(folder)
     if not candidates:
         return None, 'No se encontraron credenciales de base de datos en el .env de este proyecto.'
     for candidate in candidates:
