@@ -9,7 +9,9 @@ Separación de privilegios:
     lectura, valida cada entrada y aplica el resultado en su propia tabla
     `inet stackpanel`. Nunca ejecuta texto que venga del panel: solo IPs que
     pasan por ipaddress.ip_network.
-  - El panel le habla por un socket Unix con dos órdenes: "sync" y "status".
+  - El panel le habla por un socket Unix: "sync" y "status" para el
+    firewall, y "ssh_sessions" / "ssh_terminate" para ver y cerrar sesiones
+    SSH del host (ver sessions.py; solo por Id validado).
 
 Diseño de la tabla:
   - Cadena en prerouting con prioridad -300: corre antes del conntrack y del
@@ -45,8 +47,9 @@ import time
 from datetime import datetime, timezone
 
 import detector as detector_mod
+import sessions as sessions_mod
 
-VERSION = '3'
+VERSION = '4'
 TABLE = 'stackpanel'
 CONF_DIR = '/etc/stackpanel-guard'
 CONF_FILE = os.path.join(CONF_DIR, 'guard.conf')
@@ -609,6 +612,13 @@ def serve_socket(guard):
                     reply = {'ok': ok, 'message': msg}
                 elif cmd == 'status':
                     reply = {'ok': True, 'status': guard.status()}
+                elif cmd == 'ssh_sessions':
+                    reply = {'ok': True, 'sessions': sessions_mod.list_sessions()}
+                elif cmd == 'ssh_terminate':
+                    ok, msg = sessions_mod.terminate(req.get('id'))
+                    if ok:
+                        log.info('panel: %s', msg)
+                    reply = {'ok': ok, 'message': msg}
                 elif cmd == 'ping':
                     reply = {'ok': True, 'version': VERSION}
                 else:

@@ -10,6 +10,8 @@
 #   STACKPANEL_BRANCH  rama a instalar (default: main)
 #   PORTAL_PORT         puerto del panel si no querés que se elija solo
 #   STACKPANEL_GUARD    0 = no instalar el agente de firewall (stackpanel-guard)
+#   STACKPANEL_SSHADM   0 = no instalar la gestión de usuarios/claves/sshd (stackpanel-sshadm)
+#   SSHADM_PROTECTED_USERS  usuarios que el panel nunca puede borrar (por defecto, quien instala)
 #   STACKPANEL_SRC      carpeta local con el código, en vez de descargarlo
 #                       (para probar cambios antes de publicarlos)
 set -euo pipefail
@@ -161,7 +163,12 @@ if [ "${STACKPANEL_GUARD:-1}" != "0" ]; then
         SUDO="sudo"
         echo "==> Instalando el agente de firewall (stackpanel-guard): puede pedirte tu contraseña de sudo."
     fi
-    if ${SUDO} bash "${INSTALL_DIR}/guard/install-guard.sh" "${GUARD_ARGS[@]}" >/dev/null; then
+    # Quien instala queda como usuario protegido de stackpanel-sshadm (no se
+    # puede borrar ni quitar de sudo desde el panel).
+    PROTECTED_USER="${SSHADM_PROTECTED_USERS:-$(id -un)}"
+    [ "${PROTECTED_USER}" = "root" ] && PROTECTED_USER="${SUDO_USER:-}"
+    if ${SUDO} env SSHADM_PROTECTED_USERS="${PROTECTED_USER}" STACKPANEL_SSHADM="${STACKPANEL_SSHADM:-1}" \
+        bash "${INSTALL_DIR}/guard/install-guard.sh" "${GUARD_ARGS[@]}" >/dev/null; then
         GUARD_STATUS="activo"
         [ -n "${ADMIN_IP}" ] && GUARD_STATUS="activo (tu IP ${ADMIN_IP} quedó en la lista de emergencia)"
     else

@@ -24,6 +24,12 @@
 	</div>
 	<div class="admin-actions" style="margin:0;">
 		{% if project.url %}<a class="btn btn-secondary btn-sm" href="{{ project.url }}" target="_blank" rel="noopener">{{ icon_arrow_up_right(cls='icon icon-sm') }} Abrir</a>{% endif %}
+		{% if is_wordpress and project.url %}
+		<form method="post" action="/admin/projects/{{ project.id }}/wp-login" class="inline-form" target="_blank">
+			<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+			<button type="submit" class="btn btn-primary btn-sm" title="Entrar a wp-admin sin contraseña (enlace de un solo uso)">Entrar a WordPress</button>
+		</form>
+		{% endif %}
 		{% if containers %}
 			{% if docker_status and docker_status.running %}
 			<form method="post" action="/admin/projects/{{ project.id }}/stop" class="inline-form" onsubmit="return confirm('¿Detener {{ project.name }}?');">
@@ -170,6 +176,26 @@
 	</div>
 
 	<div class="detail-col">
+		{% if is_wordpress %}
+		<section class="detail-section">
+			<h2 class="detail-section-title">WordPress</h2>
+			<p class="detail-section-hint">«Entrar a WordPress» abre wp-admin con sesión de administrador mediante un enlace firmado que caduca en 60 s y solo sirve una vez.</p>
+			{% if wp_credentials.wp_admin_user %}
+			<div class="form-row">
+				<div class="field">
+					<label>Usuario administrador</label>
+					<input type="text" value="{{ wp_credentials.wp_admin_user }}" readonly onclick="this.select()"/>
+				</div>
+				<div class="field">
+					<label>Contraseña inicial</label>
+					<input type="password" value="{{ wp_credentials.wp_admin_password }}" readonly onfocus="this.type='text'; this.select()" onblur="this.type='password'"/>
+				</div>
+			</div>
+			<p class="detail-section-hint">Creada por el panel al instalar. Si la cambias dentro de WordPress, este valor deja de ser válido (el acceso directo sigue funcionando).</p>
+			{% endif %}
+		</section>
+		{% endif %}
+
 		<section class="detail-section">
 			<h2 class="detail-section-title">Límites de recursos</h2>
 			<form method="post" action="/admin/projects/{{ project.id }}/limits">

@@ -1,0 +1,113 @@
+{% extends "base_admin.html" %}
+{% from '_ssh_nav.html' import ssh_tabs, unlock_card, agent_down with context %}
+{% block title %}Usuario {{ name }}{% endblock %}
+{% block heading %}Accesos SSH{% endblock %}
+{% block topbar_actions %}
+<a class="btn btn-secondary btn-sm" href="/admin/ssh/users">‹ Usuarios</a>
+{% endblock %}
+{% block content %}
+{{ ssh_tabs('users') }}
+
+{% if not st %}
+{{ agent_down(st_error) }}
+{% else %}
+<style>.ssh-user-title { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:0 0 6px; font-size:var(--fs-lg); font-weight:700; text-transform:none; letter-spacing:normal; }</style>
+{% set back = '/admin/ssh/users/' ~ name %}
+{% set locked = not unlock_left or st.disabled %}
+{% set protected = name in st.protected %}
+{{ unlock_card(back) }}
+
+<h2 class="ssh-user-title">{{ user.name }}{% if protected %} <span class="status-pill custom">Protegido</span>{% endif %}{% if user.sudo %} <span class="status-pill pending">sudo</span>{% endif %}</h2>
+<p class="admin-hint">UID {{ user.uid }} · carpeta <code>{{ user.home }}</code> · shell <code>{{ user.shell }}</code> · contraseña: {{ {'set': 'definida', 'locked': 'bloqueada', 'none': 'sin contraseña'}[user.password] }}{% if user_sessions %} · <a href="/admin/ssh#sesiones">{{ user_sessions|length }} sesión(es) abierta(s)</a>{% endif %}</p>
+
+{# ------------------------------------------------------------------ #}
+<h3 id="claves" style="margin-top:20px;">Claves SSH autorizadas</h3>
+{% if user.keys_error %}<p class="admin-hint" style="color:var(--danger-text);">{{ user.keys_error }}</p>{% endif %}
+<div class="admin-table-wrap">
+	<table class="admin-table">
+		<thead><tr><th>Nombre</th><th>Tipo</th><th>Huella</th><th><span class="sr-only">Acciones</span></th></tr></thead>
+		<tbody>
+			{% for k in user.key_list %}
+			<tr>
+				<td>{{ k.comment if k.comment and k.comment != 'no comment' else '—' }}{% if k.options %}<br/><small class="admin-hint">con opciones (agregada a mano)</small>{% endif %}</td>
+				<td class="nowrap">{{ k.type }} {{ k.bits }}</td>
+				<td class="ssh-key">{{ k.fingerprint }}</td>
+				<td>
+					<form method="post" action="{{ back }}/remove-key" onsubmit="return confirm({{ ('¿Quitar la clave ' ~ k.fingerprint ~ ' de ' ~ name ~ '? Quien la use ya no podrá entrar.')|tojson|forceescape }});">
+						<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+						<input type="hidden" name="fingerprint" value="{{ k.fingerprint }}"/>
+						<button type="submit" class="btn btn-danger btn-sm" {{ 'disabled' if locked else '' }}>Quitar</button>
+					</form>
+				</td>
+			</tr>
+			{% else %}
+			<tr><td colspan="4" class="htop-loading">Sin claves. {% if user.password == 'set' %}Este usuario solo puede entrar con contraseña.{% endif %}</td></tr>
+			{% endfor %}
+		</tbody>
+	</table>
+</div>
+<form method="post" action="{{ back }}/add-key" class="admin-service-card" style="margin-top:12px;">
+	<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+	<div class="ssh-grid">
+		<label class="ssh-field" style="grid-column: 1 / -1;"><span>Clave pública nueva</span>
+			<textarea name="key" rows="3" class="input-code" required placeholder="ssh-ed25519 AAAA... nombre@equipo" spellcheck="false"></textarea></label>
+		<label class="ssh-field"><span>Nombre (opcional)</span>
+			<input type="text" name="label" maxlength="80" placeholder="ej. portátil de casa"/></label>
+	</div>
+	<div class="ssh-actions" style="margin-top:0;">
+		<button type="submit" class="btn btn-primary" {{ 'disabled' if locked else '' }}>Agregar clave</button>
+		<span class="admin-hint">Pega el contenido del archivo <code>.pub</code>. Nunca la clave privada.</span>
+	</div>
+</form>
+
+{# ------------------------------------------------------------------ #}
+<div class="ssh-grid" style="margin-top:28px;">
+	<form method="post" action="{{ back }}/password" class="admin-service-card" autocomplete="off">
+		<h3 style="margin-top:0;">Contraseña</h3>
+		<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+		<label class="ssh-field"><span>Nueva contraseña (mín. {{ st.min_password }})</span>
+			<input type="password" name="password" required minlength="{{ st.min_password }}" autocomplete="new-password"/></label>
+		<label class="ssh-field"><span>Repetir</span>
+			<input type="password" name="password2" required minlength="{{ st.min_password }}" autocomplete="new-password"/></label>
+		<div class="ssh-actions" style="margin-top:0;"><button type="submit" class="btn btn-secondary" {{ 'disabled' if locked else '' }}>Cambiar contraseña</button></div>
+		<p class="admin-hint" style="margin-top:8px;">Sirve para <code>sudo</code>{{ ' y para entrar por SSH' if st.sshd.PasswordAuthentication == 'yes' else '' }}.</p>
+	</form>
+
+	<div class="admin-service-card">
+		<h3 style="margin-top:0;">Permisos de administrador</h3>
+		{% if user.sudo %}
+		<p class="admin-hint">Está en el grupo <code>{{ st.sudo_group }}</code>: puede hacer cualquier cosa en el servidor.</p>
+		{% if protected %}
+		<p class="admin-hint">Es un usuario protegido: no se le puede quitar sudo desde el panel.</p>
+		{% else %}
+		<form method="post" action="{{ back }}/sudo" onsubmit="return confirm({{ ('¿Quitar sudo a ' ~ name ~ '?')|tojson|forceescape }});">
+			<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+			<input type="hidden" name="enabled" value="0"/>
+			<div class="ssh-actions" style="margin-top:0;"><button type="submit" class="btn btn-secondary" {{ 'disabled' if locked else '' }}>Quitar sudo</button></div>
+		</form>
+		{% endif %}
+		{% else %}
+		<p class="admin-hint">Usuario normal: solo puede tocar sus propios archivos.{% if user.password != 'set' %} Para darle sudo, primero ponle una contraseña.{% endif %}</p>
+		<form method="post" action="{{ back }}/sudo" onsubmit="return confirm({{ ('Con sudo, ' ~ name ~ ' podrá hacer cualquier cosa en el servidor. ¿Continuar?')|tojson|forceescape }});">
+			<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+			<input type="hidden" name="enabled" value="1"/>
+			<div class="ssh-actions" style="margin-top:0;"><button type="submit" class="btn btn-secondary" {{ 'disabled' if locked else '' }}>Dar sudo</button></div>
+		</form>
+		{% endif %}
+		<p class="admin-hint" style="margin-top:8px;">Un cambio de sudo se aplica en la próxima sesión del usuario.</p>
+	</div>
+
+	{% if not protected %}
+	<form method="post" action="{{ back }}/delete" class="admin-service-card" style="border-color: var(--danger-border);">
+		<h3 style="margin-top:0;">Borrar usuario</h3>
+		<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+		<p class="admin-hint">Se cierran sus sesiones y se terminan todos sus procesos. No se puede deshacer.</p>
+		<label class="checkbox-row" style="margin-bottom:10px;"><input type="checkbox" name="remove_home"/> Borrar también su carpeta <code>{{ user.home }}</code> y todo su contenido</label>
+		<label class="ssh-field"><span>Escribe <code>{{ name }}</code> para confirmar</span>
+			<input type="text" name="confirm_name" required autocomplete="off" autocapitalize="off" spellcheck="false"/></label>
+		<div class="ssh-actions" style="margin-top:0;"><button type="submit" class="btn btn-danger" {{ 'disabled' if locked else '' }}>Borrar {{ name }}</button></div>
+	</form>
+	{% endif %}
+</div>
+{% endif %}
+{% endblock %}

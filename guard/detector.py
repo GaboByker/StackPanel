@@ -335,7 +335,10 @@ class Detector:
             addr = ipaddress.ip_address(ip)
         except ValueError:
             return
-        if not addr.is_global:
+        # Los accesos correctos se guardan siempre (también desde la LAN o
+        # una VPN): son el historial de quién entró. Los fallos de redes no
+        # públicas no se cuentan, porque nunca se bloquean.
+        if not addr.is_global and result != 'ok':
             return
         ip = str(addr)
         with self.lock:

@@ -1,0 +1,80 @@
+{# Pestañas de /admin/ssh y tarjeta de desbloqueo (contraseña + 2FA). #}
+{% macro ssh_tabs(active) %}
+<nav class="ssh-tabs" aria-label="Secciones de SSH">
+	{% for key, href, label in [('access', '/admin/ssh', 'Accesos y sesiones'), ('users', '/admin/ssh/users', 'Usuarios y claves'), ('config', '/admin/ssh/config', 'Configuración de SSH')] %}
+	<a href="{{ href }}" class="{{ 'is-active' if key == active else '' }}"{% if key == active %} aria-current="page"{% endif %}>{{ label }}</a>
+	{% endfor %}
+</nav>
+<style>
+/* Pestañas: una sola fila; en pantallas chicas se desplazan en vez de partirse. */
+.ssh-tabs { display:flex; gap:4px; border-bottom:1px solid var(--border); margin:0 0 18px; overflow-x:auto; scrollbar-width:none; }
+.ssh-tabs::-webkit-scrollbar { display:none; }
+.ssh-tabs a { display:flex; align-items:center; min-height:44px; padding:0 14px; white-space:nowrap; text-decoration:none; color:var(--text-muted, var(--text)); border-bottom:2px solid transparent; margin-bottom:-1px; font-size:var(--fs-sm); }
+.ssh-tabs a:hover { color:var(--accent); }
+.ssh-tabs a:focus-visible { outline:2px solid var(--accent); outline-offset:-2px; }
+.ssh-tabs a.is-active { color:var(--text); border-bottom-color:var(--accent); font-weight:600; }
+/* El texto oculto de las cabeceras (sr-only) es absolute: sin esto se escapa
+   del scroll de la tabla y ensancha toda la página en el móvil. */
+.admin-table-wrap { position:relative; }
+.ssh-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); gap:16px; }
+.ssh-field { display:flex; flex-direction:column; gap:4px; margin-bottom:10px; }
+.ssh-field > span { font-size:var(--fs-sm); font-weight:500; }
+.ssh-key { font-family:var(--font-mono); font-size:var(--fs-xs); overflow-wrap:anywhere; }
+/* Fila de acciones: los botones conservan su ancho (las tarjetas son flex en columna). */
+.ssh-actions { display:flex; flex-wrap:wrap; align-items:center; gap:8px 12px; margin-top:12px; }
+.ssh-actions .admin-hint { margin:0; }
+.ssh-row-actions { display:flex; gap:6px; flex-wrap:wrap; }
+.ssh-topbar-actions { display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
+.ssh-unlock { display:flex; gap:8px; flex-wrap:wrap; align-items:stretch; }
+.ssh-unlock input { flex:1 1 200px; max-width:260px; }
+.ssh-unlock input[name="code"] { flex:0 1 130px; }
+.ssh-search { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:0 0 10px; }
+.ssh-search input[type="search"] {
+	flex:1 1 240px; max-width:420px; min-width:0; padding:var(--input-py) var(--input-px);
+	border:1px solid var(--input-border); border-radius:var(--input-radius); background:var(--input-bg);
+	color:var(--text); font-size:var(--fs-base); transition:var(--transition-colors);
+}
+.ssh-search input[type="search"]:hover { border-color:var(--border-strong); }
+.ssh-search input[type="search"]:focus { outline:none; border-color:var(--input-focus-border); box-shadow:var(--input-focus-ring); }
+.ssh-search input[type="search"]::placeholder { color:var(--text-faint); }
+.nowrap { white-space:nowrap; }
+.admin-table-wrap th { white-space:nowrap; }
+.sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
+@media (max-width: 640px) {
+	.ssh-topbar-actions .btn { padding-left:10px; padding-right:10px; }
+	.ssh-unlock input, .ssh-unlock input[name="code"] { max-width:none; flex:1 1 100%; }
+	.ssh-unlock .btn { flex:1 1 100%; justify-content:center; }
+}
+</style>
+{% endmacro %}
+
+{% macro unlock_card(back) %}
+{% if unlock_left %}
+<div class="admin-hint ssh-actions" style="margin:0 0 16px;">
+	<span class="status-pill running">Gestión desbloqueada</span>
+	Quedan {{ (unlock_left // 60) + 1 }} min.
+	<form method="post" action="/admin/ssh/lock" style="display:inline;">
+		<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+		<input type="hidden" name="back" value="{{ back }}"/>
+		<button type="submit" class="btn btn-secondary btn-sm">Bloquear ahora</button>
+	</form>
+</div>
+{% else %}
+<article class="admin-service-card" style="margin-bottom:20px; border-color: var(--warn-border); background: var(--warn-bg);">
+	<p style="margin:0 0 10px;"><strong>Confirma tu identidad para hacer cambios.</strong> Crear usuarios, tocar claves o cambiar sshd da acceso al servidor, así que se vuelve a pedir tu contraseña del panel{{ ' y tu código 2FA' if totp_enabled else '' }}. Queda desbloqueado {{ unlock_minutes }} minutos.</p>
+	<form method="post" action="/admin/ssh/unlock" class="ssh-unlock">
+		<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+		<input type="hidden" name="back" value="{{ back }}"/>
+		<input type="password" name="password" placeholder="Contraseña del panel" autocomplete="current-password" required aria-label="Contraseña del panel"/>
+		{% if totp_enabled %}<input type="text" name="code" placeholder="Código 2FA" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" required aria-label="Código 2FA"/>{% endif %}
+		<button type="submit" class="btn btn-primary">Desbloquear</button>
+	</form>
+</article>
+{% endif %}
+{% endmacro %}
+
+{% macro agent_down(error) %}
+<article class="admin-service-card" style="margin-bottom:20px; border-color: var(--danger-border); background: var(--danger-bg);">
+	<p style="margin:0;"><strong>El agente <code>stackpanel-sshadm</code> no responde</strong> ({{ error }}). Se instala junto con el firewall; desde la carpeta del panel ejecuta por SSH: <code>sudo ./guard/install-guard.sh</code></p>
+</article>
+{% endmacro %}

@@ -1,0 +1,142 @@
+{% extends "base_admin.html" %}
+{% from '_ssh_nav.html' import ssh_tabs, unlock_card, agent_down with context %}
+{% block title %}Configuración de SSH{% endblock %}
+{% block heading %}Accesos SSH{% endblock %}
+{% block content %}
+{{ ssh_tabs('config') }}
+
+{% if not st %}
+{{ agent_down(st_error) }}
+{% else %}
+
+{% if pending %}
+<article class="admin-service-card" id="sshd-pending" data-seconds="{{ pending.seconds_left }}" style="margin-bottom:20px; border-color: var(--warn-border); background: var(--warn-bg);">
+	<p style="margin:0 0 8px;"><strong>Configuración de SSH aplicada a prueba.</strong> Tu conexión actual sigue abierta, pero hay que comprobar que todavía se puede <strong>entrar de nuevo</strong>.</p>
+	<ol style="margin:0 0 10px; padding-left:20px;">
+		<li><strong>No cierres</strong> la sesión SSH que ya tienes abierta.</li>
+		<li>Abre <strong>otra</strong> conexión SSH nueva al servidor, con la clave o contraseña que vas a usar desde ahora.</li>
+		<li>Cuando el panel detecte ese acceso nuevo, podrás confirmar.</li>
+	</ol>
+	<p style="margin:0 0 10px;">Si no confirmas en <strong><span id="sshd-countdown">{{ pending.seconds_left }}</span> s</strong>, el servidor vuelve solo a la configuración anterior.</p>
+	<p id="sshd-login" style="margin:0 0 10px;">
+		{% if login_seen %}<span class="status-pill running">Acceso nuevo detectado</span> {{ login_seen.email }} desde <code>{{ login_seen.ip }}</code> ({{ (login_seen.detail or '')|replace('Acceso con ', '') }}).
+		{% else %}<span class="status-pill pending">Esperando un acceso SSH nuevo…</span>{% endif %}
+	</p>
+	<div class="ssh-row-actions">
+		<form method="post" action="/admin/ssh/config/confirm">
+			<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+			<button type="submit" id="sshd-confirm" class="btn btn-primary btn-sm" {{ '' if login_seen and unlock_left else 'disabled' }}>Confirmar configuración</button>
+		</form>
+		<form method="post" action="/admin/ssh/config/revert">
+			<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+			<button type="submit" class="btn btn-secondary btn-sm">Descartar y volver atrás</button>
+		</form>
+	</div>
+</article>
+{% elif st.last_revert %}
+<p class="admin-hint">Última reversión: {{ st.last_revert.at[:19].replace('T', ' ') }} UTC ({{ st.last_revert.reason }}).</p>
+{% endif %}
+
+{{ unlock_card('/admin/ssh/config') }}
+
+<p class="admin-hint">
+	Estos ajustes se guardan en <code>/etc/ssh/sshd_config.d/05-stackpanel.conf</code>, que tiene prioridad sobre el resto de la configuración. Antes de aplicarlos se validan con <code>sshd -t</code>, y nunca se aceptan si dejarían el servidor sin ningún usuario con sudo que pueda entrar.
+	Recargar sshd no corta las conexiones abiertas.
+	{% if st.sshd_extra.port %}Puerto actual: <code>{{ st.sshd_extra.port }}</code> (se cambia a mano, junto con el <a href="/admin/firewall">firewall</a>).{% endif %}
+</p>
+{% if st.sshd_error %}<p class="admin-hint" style="color:var(--danger-text);">No se pudo leer la configuración efectiva: {{ st.sshd_error }}</p>{% endif %}
+
+{% set cur = st.sshd %}
+<style>
+.ssh-settings { display:flex; flex-direction:column; }
+.ssh-setting { display:grid; grid-template-columns:minmax(180px, 1.1fr) 90px minmax(180px, 1fr) 2fr; gap:8px 16px; align-items:center; padding:14px 0; border-bottom:1px solid var(--border); }
+.ssh-setting:first-child { padding-top:0; }
+.ssh-setting-name strong { display:block; margin-bottom:2px; }
+.ssh-setting-now .admin-hint { display:none; }
+.ssh-setting-desc small { display:block; line-height:1.5; color:var(--text-muted, var(--text)); }
+@media (max-width: 860px) {
+	.ssh-setting { grid-template-columns:1fr auto; }
+	.ssh-setting-now { justify-self:end; }
+	.ssh-setting-now .admin-hint { display:inline; margin:0; }
+	.ssh-setting-new, .ssh-setting-desc { grid-column:1 / -1; }
+}
+</style>
+{% set sudo_with_key = st.users|selectattr('sudo')|selectattr('keys', '>', 0)|list %}
+<form method="post" action="/admin/ssh/config/apply" class="admin-service-card">
+	<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+	<div class="ssh-settings" role="list">
+		<div class="ssh-setting" role="listitem">
+			<div class="ssh-setting-name"><strong>Entrar como root</strong> <code>PermitRootLogin</code></div>
+			<div class="ssh-setting-now"><span class="admin-hint">Ahora</span> <code>{{ cur.PermitRootLogin or '?' }}</code></div>
+			<div class="ssh-setting-new"><select name="PermitRootLogin" aria-label="PermitRootLogin">
+						{% for v, l in [('no', 'No permitido (recomendado)'), ('prohibit-password', 'Solo con clave'), ('yes', 'Permitido')] %}<option value="{{ v }}" {{ 'selected' if cur.PermitRootLogin == v or (v == 'prohibit-password' and cur.PermitRootLogin == 'without-password') else '' }}>{{ l }}</option>{% endfor %}
+					</select></div>
+			<div class="ssh-setting-desc"><small>Lo más seguro es entrar con tu usuario y usar <code>sudo</code>. root es el primer usuario que prueban los ataques.</small></div>
+		</div>
+		<div class="ssh-setting" role="listitem">
+			<div class="ssh-setting-name"><strong>Entrar con contraseña</strong> <code>PasswordAuthentication</code></div>
+			<div class="ssh-setting-now"><span class="admin-hint">Ahora</span> <code>{{ cur.PasswordAuthentication or '?' }}</code></div>
+			<div class="ssh-setting-new"><select name="PasswordAuthentication" aria-label="PasswordAuthentication">
+						{% for v, l in [('no', 'No, solo con clave (recomendado)'), ('yes', 'Sí')] %}<option value="{{ v }}" {{ 'selected' if cur.PasswordAuthentication == v else '' }}>{{ l }}</option>{% endfor %}
+					</select></div>
+			<div class="ssh-setting-desc"><small>Sin contraseñas, los ataques de fuerza bruta dejan de tener sentido.
+						{% if not sudo_with_key %}<br/><strong style="color:var(--danger-text);">Ningún usuario con sudo tiene clave todavía:</strong> agrega una en <a href="/admin/ssh/users">Usuarios y claves</a> antes de desactivarlo.{% endif %}</small></div>
+		</div>
+		<div class="ssh-setting" role="listitem">
+			<div class="ssh-setting-name"><strong>Intentos por conexión</strong> <code>MaxAuthTries</code></div>
+			<div class="ssh-setting-now"><span class="admin-hint">Ahora</span> <code>{{ cur.MaxAuthTries or '?' }}</code></div>
+			<div class="ssh-setting-new"><select name="MaxAuthTries" aria-label="MaxAuthTries">
+						{% for n in range(1, 11) %}<option value="{{ n }}" {{ 'selected' if cur.MaxAuthTries == n|string else '' }}>{{ n }}</option>{% endfor %}
+					</select></div>
+			<div class="ssh-setting-desc"><small>Claves o contraseñas que se pueden probar antes de que sshd corte. 3 es un buen valor; si usas muchas claves en tu agente SSH, súbelo.</small></div>
+		</div>
+		<div class="ssh-setting" role="listitem">
+			<div class="ssh-setting-name"><strong>Reenvío de X11</strong> <code>X11Forwarding</code></div>
+			<div class="ssh-setting-now"><span class="admin-hint">Ahora</span> <code>{{ cur.X11Forwarding or '?' }}</code></div>
+			<div class="ssh-setting-new"><select name="X11Forwarding" aria-label="X11Forwarding">
+						{% for v, l in [('no', 'No (recomendado)'), ('yes', 'Sí')] %}<option value="{{ v }}" {{ 'selected' if cur.X11Forwarding == v else '' }}>{{ l }}</option>{% endfor %}
+					</select></div>
+			<div class="ssh-setting-desc"><small>Abrir ventanas gráficas del servidor en tu equipo. En un servidor casi nunca hace falta.</small></div>
+		</div>
+	</div>
+	<div class="ssh-actions">
+		<button type="submit" class="btn btn-primary" {{ 'disabled' if not unlock_left or pending or st.disabled else '' }}>Aplicar a prueba ({{ st.confirm_seconds // 60 }} min)</button>
+		{% if pending %}<span class="admin-hint">Primero confirma o descarta el cambio pendiente.</span>
+		{% elif not unlock_left %}<span class="admin-hint">Desbloquea arriba para cambiar la configuración.</span>{% endif %}
+	</div>
+</form>
+{% endif %}
+
+<script>
+(function () {
+	var box = document.getElementById('sshd-pending');
+	if (!box) return;
+	var left = parseInt(box.dataset.seconds, 10) || 0;
+	var out = document.getElementById('sshd-countdown');
+	var login = document.getElementById('sshd-login');
+	var btn = document.getElementById('sshd-confirm');
+	var unlocked = {{ 'true' if unlock_left else 'false' }};
+	setInterval(function () {
+		left = Math.max(0, left - 1);
+		out.textContent = left;
+		if (left === 0) setTimeout(function () { location.reload(); }, 3000);
+	}, 1000);
+	setInterval(function () {
+		fetch('/admin/ssh/config/check', { credentials: 'same-origin' }).then(function (r) { return r.json(); }).then(function (d) {
+			if (!d.pending) { location.reload(); return; }
+			left = d.seconds_left;
+			if (d.login && login.dataset.seen !== '1') {
+				login.dataset.seen = '1';
+				login.textContent = '';
+				var pill = document.createElement('span');
+				pill.className = 'status-pill running';
+				pill.textContent = 'Acceso nuevo detectado';
+				login.appendChild(pill);
+				login.appendChild(document.createTextNode(' ' + (d.login.email || '') + ' desde ' + d.login.ip));
+				if (unlocked) btn.disabled = false;
+			}
+		}).catch(function () {});
+	}, 4000);
+})();
+</script>
+{% endblock %}

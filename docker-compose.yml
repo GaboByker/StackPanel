@@ -23,6 +23,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - /run/stackpanel-guard:/run/stackpanel-guard
+      - /run/stackpanel-sshadm:/run/stackpanel-sshadm
       - ${STACK_ROOT:?definí STACK_ROOT en .env}:/stack:ro
       - ./instance:/app/instance
       - ./proxy/sites:/app/proxy-sites

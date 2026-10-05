@@ -1,4 +1,4 @@
-{% from '_icons.html' import icon_dashboard, icon_stack, icon_folder, icon_globe, icon_shield, icon_archive, icon_cpu, icon_bell, icon_share, icon_users, icon_arrow_up_right %}
+{% from '_icons.html' import icon_dashboard, icon_stack, icon_folder, icon_globe, icon_shield, icon_archive, icon_cpu, icon_bell, icon_share, icon_users, icon_terminal, icon_arrow_up_right %}
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -32,6 +32,7 @@
 				<a href="/admin/proxy" class="{{ 'active' if request.path.startswith('/admin/proxy') else '' }}">{{ icon_globe() }}<span>Proxy &amp; SSL</span></a>
 				<a href="/admin/security" class="{{ 'active' if request.path.startswith('/admin/security') else '' }}">{{ icon_shield() }}<span>Seguridad</span></a>
 				<a href="/admin/firewall" class="{{ 'active' if request.path.startswith('/admin/firewall') else '' }}">{{ icon_shield() }}<span>Firewall</span></a>
+				<a href="/admin/ssh" class="{{ 'active' if request.path.startswith('/admin/ssh') else '' }}">{{ icon_terminal() }}<span>Accesos SSH</span></a>
 				<a href="/admin/backups" class="{{ 'active' if request.path.startswith('/admin/backups') else '' }}">{{ icon_archive() }}<span>Backups</span></a>
 				<a href="/admin/resources" class="{{ 'active' if request.path.startswith('/admin/resources') else '' }}">{{ icon_cpu() }}<span>Recursos</span></a>
 				<a href="/admin/notifications" class="{{ 'active' if request.path.startswith('/admin/notifications') else '' }}">{{ icon_bell() }}<span>Notificaciones</span></a>
@@ -120,6 +121,10 @@
 
 			document.addEventListener('submit', function (event) {
 				if (event.defaultPrevented) { return; }
+				// Los formularios que abren otra pestaña (p. ej. "Entrar a
+				// WordPress") no navegan esta página: no hay nada que esperar.
+				var target = (event.submitter && event.submitter.getAttribute('formtarget')) || event.target.getAttribute('target');
+				if (target && target !== '_self') { return; }
 
 				var submitter = event.submitter || null;
 

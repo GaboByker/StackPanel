@@ -14,11 +14,13 @@ SETTING_KEYS = [
     'smtp_host', 'smtp_port', 'smtp_user', 'smtp_password', 'smtp_from', 'smtp_to', 'smtp_use_tls',
     'smtp_enabled',
     'notify_project_down', 'notify_disk_full', 'notify_ssl_expiring', 'notify_security_ban',
+    'notify_ssh_new_ip',
 ]
 
 _CHECKBOX_KEYS = {
     'discord_enabled', 'slack_enabled', 'smtp_enabled', 'smtp_use_tls',
     'notify_project_down', 'notify_disk_full', 'notify_ssl_expiring', 'notify_security_ban',
+    'notify_ssh_new_ip',
 }
 
 
@@ -77,7 +79,7 @@ def send_email(cfg, title, message):
 
 
 def notify(root, event_key, title, message):
-    """event_key: 'project_down' | 'disk_full' | 'ssl_expiring' | 'security_ban' | 'test'.
+    """event_key: 'project_down' | 'disk_full' | 'ssl_expiring' | 'security_ban' | 'ssh_new_ip' | 'test'.
     'test' ignora las casillas de evento (se usa para el botón de prueba)."""
     cfg = get_config(root)
     if event_key != 'test' and cfg.get(f'notify_{event_key}') != '1':

@@ -1,0 +1,165 @@
+{% extends "base_admin.html" %}
+{% from '_ssh_nav.html' import ssh_tabs %}
+{% block title %}Accesos SSH{% endblock %}
+{% block heading %}Accesos SSH{% endblock %}
+{% block topbar_actions %}
+<div class="ssh-topbar-actions">
+	<a class="btn btn-secondary btn-sm" href="/admin/security">IPs bloqueadas</a>
+	<a class="btn btn-secondary btn-sm" href="/admin/notifications">Avisos</a>
+</div>
+{% endblock %}
+{% block content %}
+{{ ssh_tabs('access') }}
+
+{% macro fmt(ts) %}{{ ts[:19].replace('T', ' ') if ts else '—' }}{% endmacro %}
+{% macro surl(over) -%}
+{%- set merged = dict(params, **over) -%}
+/admin/ssh?{{ merged | dictsort | selectattr(1) | list | urlencode }}#accesos
+{%- endmacro %}
+
+<p class="admin-hint">
+	Quién entra al servidor por SSH y a los proyectos por SFTP, y quién está conectado ahora mismo. Los datos los recoge el agente <code>stackpanel-guard</code> de los logs del servidor.
+	Las horas se muestran en UTC. Los accesos correctos se conservan {{ retention_days }} días; tu IP actual es <code>{{ my_ip }}</code>.
+</p>
+
+<div class="stats-grid" style="margin-bottom:20px;">
+	<div class="stat-tile"><div class="stat-tile-value">{{ sessions|selectattr('can_terminate')|selectattr('state', 'in', ['active', 'online'])|list|length if sessions is not none else '—' }}</div><div class="stat-tile-label">Conexiones SSH activas</div></div>
+	<div class="stat-tile"><div class="stat-tile-value">{{ summary.logins_24h }}</div><div class="stat-tile-label">Accesos en 24 h</div></div>
+	<div class="stat-tile"><div class="stat-tile-value">{{ summary.ips_30d }}</div><div class="stat-tile-label">IPs distintas en 30 días</div></div>
+	<div class="stat-tile"><div class="stat-tile-value">{{ summary.users_30d }}</div><div class="stat-tile-label">Usuarios en 30 días</div></div>
+</div>
+
+{# ------------------------------------------------------------------ #}
+<h2 class="landing-section-title" id="sesiones" style="margin-top:8px;">Sesiones abiertas ahora</h2>
+{% if sessions is none %}
+<article class="admin-service-card" style="margin-bottom:20px; border-color: var(--danger-border); background: var(--danger-bg);">
+	<p style="margin:0;"><strong>No se pudo pedir la lista al agente</strong> ({{ sessions_error }}). Si acabas de actualizar el panel, actualiza también el agente por SSH desde la carpeta del panel: <code>sudo ./guard/install-guard.sh</code></p>
+</article>
+{% else %}
+<p class="admin-hint">
+	Una sesión <strong>activa</strong> es alguien conectado ahora. <strong>Con procesos vivos</strong> significa que el usuario ya se desconectó pero dejó programas en marcha (tmux, screen, un comando con <code>nohup</code>…).
+	Al cerrar una sesión terminan <strong>todos</strong> sus procesos, también esos. La conexión SFTP de los proyectos no aparece aquí: corre dentro de su propio contenedor.
+</p>
+<div class="admin-table-wrap">
+	<table class="admin-table">
+		<thead><tr><th>Usuario</th><th>Origen</th><th>Terminal</th><th>Inicio</th><th>Estado</th><th>Procesos</th><th><span class="sr-only">Acciones</span></th></tr></thead>
+		<tbody>
+			{% for s in sessions %}
+			{% set mine = s.host and s.host == my_ip %}
+			<tr>
+				<td><strong>{{ s.user }}</strong></td>
+				<td>
+					{% if s.remote %}<code>{{ s.host or '?' }}</code>{% if mine %} <span class="status-pill running">Tu IP</span>{% endif %}
+					{% else %}Consola local{% endif %}
+					<br/><small class="admin-hint">{{ s.service or '—' }}</small>
+				</td>
+				<td>{{ s.tty or '—' }}</td>
+				<td class="nowrap">{{ fmt(s.started_at) }}</td>
+				<td>
+					{% if s.state == 'closing' %}<span class="status-pill pending">Con procesos vivos</span>
+					{% elif s.state in ('active', 'online') %}<span class="status-pill running">Activa</span>
+					{% else %}<span class="status-pill custom">{{ s.state }}</span>{% endif %}
+				</td>
+				<td style="max-width:280px; overflow-wrap:anywhere;">
+					<small>{{ s.processes|join(', ') or '—' }}{% if s.process_count > s.processes|length %} …{% endif %}</small>
+					<br/><small class="admin-hint">{{ s.process_count }} en total</small>
+				</td>
+				<td>
+					{% if s.can_terminate %}
+					{% set warn = 'Se cerrará la sesión ' ~ s.id ~ ' de ' ~ s.user ~ ' (' ~ (s.host or '?') ~ ') y terminarán sus ' ~ s.process_count ~ ' procesos: ' ~ (s.processes|join(', ')) ~ '.' %}
+					{% if mine %}{% set warn = warn ~ ' OJO: viene de tu misma IP; podría ser tu propia conexión.' %}{% endif %}
+					<div class="ssh-row-actions">
+						<form method="post" action="/admin/ssh/sessions/terminate" onsubmit="return confirm({{ (warn ~ ' ¿Continuar?')|tojson|forceescape }});">
+							<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+							<input type="hidden" name="session_id" value="{{ s.id }}"/>
+							<button type="submit" class="btn btn-secondary btn-sm">Cerrar</button>
+						</form>
+						{% if not mine and s.host %}
+						<form method="post" action="/admin/ssh/sessions/terminate" onsubmit="return confirm({{ (warn ~ ' Además, ' ~ s.host ~ ' quedará bloqueada 24 h en todos los puertos. ¿Continuar?')|tojson|forceescape }});">
+							<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+							<input type="hidden" name="session_id" value="{{ s.id }}"/>
+							<input type="hidden" name="host" value="{{ s.host }}"/>
+							<input type="hidden" name="ban" value="1"/>
+							<button type="submit" class="btn btn-secondary btn-sm">Cerrar y bloquear IP</button>
+						</form>
+						{% endif %}
+					</div>
+					{% endif %}
+				</td>
+			</tr>
+			{% else %}
+			<tr><td colspan="7" class="htop-loading">No hay sesiones abiertas.</td></tr>
+			{% endfor %}
+		</tbody>
+	</table>
+</div>
+{% endif %}
+
+{# ------------------------------------------------------------------ #}
+<h2 class="landing-section-title" id="conocidas" style="margin-top:28px;">Desde dónde entra cada usuario</h2>
+<p class="admin-hint">Una fila por usuario e IP. Si aparece una combinación que no reconoces, revísala en el historial de abajo y bloquéala desde <a href="/admin/security#bloqueos">Seguridad</a>.</p>
+<div class="admin-table-wrap">
+	<table class="admin-table">
+		<thead><tr><th>Servicio</th><th>Usuario</th><th>IP</th><th>Accesos</th><th>Primero</th><th>Último</th></tr></thead>
+		<tbody>
+			{% for k in known %}
+			<tr>
+				<td>{{ services.get(k.service, k.service) }}</td>
+				<td>{{ k.user or '—' }}</td>
+				<td class="nowrap"><code>{{ k.ip }}</code>{% if k.ip == my_ip %} <span class="status-pill running">Tu IP</span>{% endif %}</td>
+				<td>{{ '{:,}'.format(k.logins) }}</td>
+				<td class="nowrap">{{ fmt(k.first_ts) }}</td>
+				<td class="nowrap">{{ fmt(k.last_ts) }}</td>
+			</tr>
+			{% else %}
+			<tr><td colspan="6" class="htop-loading">Todavía no hay accesos registrados.</td></tr>
+			{% endfor %}
+		</tbody>
+	</table>
+</div>
+
+{# ------------------------------------------------------------------ #}
+<h2 class="landing-section-title" id="accesos" style="margin-top:28px;">Historial de accesos</h2>
+<p class="admin-hint">
+	Servicio:
+	{% if not logins.service %}<strong>Todos</strong>{% else %}<a href="{{ surl({'service': None, 'page': None}) }}">Todos</a>{% endif %}
+	{% for key, label in services.items() %} · {% if logins.service == key %}<strong>{{ label }}</strong>{% else %}<a href="{{ surl({'service': key, 'page': None}) }}">{{ label }}</a>{% endif %}{% endfor %}
+	&nbsp;&nbsp;|&nbsp;&nbsp;
+	{% if logins.only_new %}<strong>Solo IPs nuevas</strong> · <a href="{{ surl({'new': None, 'page': None}) }}">Ver todos</a>{% else %}<a href="{{ surl({'new': '1', 'page': None}) }}">Solo IPs nuevas</a>{% endif %}
+</p>
+<form method="get" action="/admin/ssh#accesos" class="ssh-search" role="search">
+	{% for k, v in params.items() if k not in ('q',) %}<input type="hidden" name="{{ k }}" value="{{ v }}"/>{% endfor %}
+	<input type="search" name="q" value="{{ logins.q }}" placeholder="Buscar IP, usuario o método…" aria-label="Buscar en el historial"/>
+	<button type="submit" class="btn btn-secondary btn-sm">Buscar</button>
+	{% if logins.q %}<a class="btn btn-secondary btn-sm" href="{{ surl({'q': None, 'page': None}) }}">Limpiar</a>{% endif %}
+	<span class="admin-hint" style="margin:0;">{{ '{:,}'.format(logins.total) }} {{ 'acceso' if logins.total == 1 else 'accesos' }}</span>
+</form>
+<div class="admin-table-wrap">
+	<table class="admin-table">
+		<thead><tr><th>Fecha</th><th>Servicio</th><th>Usuario</th><th>IP</th><th>Método</th><th><span class="sr-only">Marca</span></th></tr></thead>
+		<tbody>
+			{% for e in logins['items'] %}
+			<tr>
+				<td class="nowrap">{{ fmt(e.ts) }}</td>
+				<td>{{ services.get(e.service, e.service) }}</td>
+				<td>{{ e.email or '—' }}</td>
+				<td class="nowrap"><code>{{ e.ip }}</code>{% if e.ip == my_ip %} <span class="status-pill running">Tu IP</span>{% endif %}</td>
+				<td>{{ {'password': 'Contraseña', 'publickey': 'Clave SSH', 'keyboard-interactive/pam': 'Interactivo'}.get((e.detail or '').replace('Acceso con ', ''), (e.detail or '—').replace('Acceso con ', '')) }}</td>
+				<td class="nowrap">{% if e.is_new %}<span class="status-pill pending" title="Primer acceso de este usuario desde esta IP">IP nueva</span>{% endif %}</td>
+			</tr>
+			{% else %}
+			<tr><td colspan="6" class="htop-loading">{% if logins.q %}Ningún acceso coincide con «{{ logins.q }}».{% else %}No hay accesos registrados con estos filtros.{% endif %}</td></tr>
+			{% endfor %}
+		</tbody>
+	</table>
+</div>
+{% if logins.pages > 1 %}
+<nav class="ssh-actions" aria-label="Paginado del historial">
+	{% if logins.page > 1 %}<a class="btn btn-secondary btn-sm" href="{{ surl({'page': logins.page - 1 if logins.page > 2 else None}) }}">‹ Anterior</a>{% endif %}
+	<span class="admin-hint" style="margin:0;">Página {{ logins.page }} de {{ logins.pages }}</span>
+	{% if logins.page < logins.pages %}<a class="btn btn-secondary btn-sm" href="{{ surl({'page': logins.page + 1}) }}">Siguiente ›</a>{% endif %}
+</nav>
+{% endif %}
+<p class="admin-hint" style="margin-top:14px;">Para recibir un aviso cada vez que alguien entra desde una IP nueva, activa «Alguien entra por SSH o SFTP desde una IP nueva» en <a href="/admin/notifications">Notificaciones</a>.</p>
+
+{% endblock %}

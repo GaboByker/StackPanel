@@ -66,6 +66,9 @@
 		<label class="checkbox-row">
 			<input type="checkbox" name="notify_security_ban" {{ 'checked' if cfg.notify_security_ban == '1' else '' }}/> Se bloquea una IP por intentos fallidos
 		</label>
+		<label class="checkbox-row">
+			<input type="checkbox" name="notify_ssh_new_ip" {{ 'checked' if cfg.notify_ssh_new_ip == '1' else '' }}/> Alguien entra por SSH o SFTP desde una IP nueva
+		</label>
 	</article>
 
 	<button type="submit" class="btn btn-primary">Guardar</button>

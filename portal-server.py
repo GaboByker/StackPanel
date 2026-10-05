@@ -6,6 +6,7 @@ import re
 import secrets
 import shutil
 import sqlite3
+import time
 from datetime import datetime, timedelta, timezone
 
 from flask import (
@@ -76,6 +77,10 @@ import project_git
 import firewall_rules
 import guard_client
 import security
+import resource_charts
+import ssh_access
+import wp_sso
+import sshadm_client
 import site_presets
 import subprocess
 import pyotp
@@ -103,6 +108,18 @@ def get_public_host():
 
 def get_certbot_email():
     return panel_db.get_setting(PORTAL_ROOT, 'certbot_email') or CERTBOT_EMAIL
+
+
+def _project_local_folder(project):
+    """Carpeta del proyecto en el montaje r/w del panel (solo proyectos bajo html/)."""
+    folder = (project or {}).get('folder') or ''
+    if not folder.startswith('html/'):
+        return None
+    return os.path.join(files_control.html_root(STACK_ROOT), folder[5:])
+
+
+def _is_wordpress(project):
+    return project.get('template') == 'wordpress' or wp_sso.is_wordpress(_project_local_folder(project))
 
 
 def _project_paths(key):
@@ -165,6 +182,7 @@ csrf = CSRFProtect(app)
 init_db(PORTAL_ROOT)
 panel_db.init_db(PORTAL_ROOT)
 security.init_db(PORTAL_ROOT)
+ssh_access.init_db(PORTAL_ROOT)
 security.ensure_jail_defaults(PORTAL_ROOT)
 os.makedirs(BACKUPS_DIR, exist_ok=True)
 scheduler.start(PORTAL_ROOT, STACK_ROOT, BACKUPS_DIR)
@@ -579,6 +597,7 @@ def admin_projects():
     for project in projects:
         project['docker_status'] = containers_status(project['containers']) if project['containers'] else None
         project['db_count'] = len(panel_db.list_databases(PORTAL_ROOT, project['db_id']))
+        project['is_wordpress'] = _is_wordpress(project)
         if project['db_count']:
             with_db += 1
         if project['docker_status']:
@@ -986,6 +1005,8 @@ def admin_project_detail(project_id):
         has_env=has_env,
         can_clone=bool(project.get('template')),
         has_php_config=project.get('template') == 'wordpress',
+        is_wordpress=_is_wordpress(project),
+        wp_credentials={k: v for k, v in panel_db.project_secrets(project).items() if k.startswith('wp_admin_')},
         repos=panel_db.project_repos(project),
         sftp_users=panel_db.list_sftp_users(PORTAL_ROOT, project_id),
         sftp_host=get_public_host(),
@@ -1103,6 +1124,29 @@ def admin_project_git_pull(project_id):
     return redirect(url_for('admin_project_detail', project_id=project_id))
 
 
+@app.route('/admin/projects/<int:project_id>/wp-login', methods=['POST'])
+def admin_project_wp_login(project_id):
+    """Acceso directo a wp-admin: enlace firmado, de un solo uso y 60 s de vida."""
+    if not get_admin_id():
+        return redirect(url_for('admin_login'))
+    project = panel_db.get_project(PORTAL_ROOT, project_id)
+    local_folder = _project_local_folder(project)
+    if not project or not wp_sso.is_wordpress(local_folder):
+        abort(404)
+    url = next((p['url'] for p in load_projects() if p['db_id'] == project_id), None)
+    if not url:
+        flash('Este proyecto no tiene una dirección pública para abrir WordPress.', 'error')
+        return redirect(url_for('admin_project_detail', project_id=project_id))
+    try:
+        key = wp_sso.ensure(local_folder)
+    except OSError as exc:
+        flash(f'No se pudo preparar el acceso directo: {exc}', 'error')
+        return redirect(url_for('admin_project_detail', project_id=project_id))
+    user = panel_db.project_secrets(project).get('wp_admin_user')
+    panel_db.log_action(PORTAL_ROOT, current_admin_email(), 'wp_login', project['name'])
+    return redirect(wp_sso.login_url(url, key, user))
+
+
 @app.route('/admin/projects/<int:project_id>/clone', methods=['POST'])
 def admin_project_clone(project_id):
     if not get_admin_id():
@@ -1132,6 +1176,12 @@ def admin_project_clone(project_id):
     if error:
         flash(f'Archivos copiados, pero no se pudo levantar el clon: {error}', 'error')
         return redirect(url_for('admin_project_detail', project_id=project_id))
+    if wp_sso.is_wordpress(local_folder):
+        wp_sso.ensure(local_folder, rotate=True)   # el clon no comparte la clave de acceso del original
+        old_secrets = panel_db.project_secrets(project)
+        for field in ('wp_admin_user', 'wp_admin_password'):
+            if old_secrets.get(field):
+                secrets = {**(secrets or {}), field: old_secrets[field]}
 
     panel_db.insert_project(
         PORTAL_ROOT, key, new_name, project.get('description', ''), 'port', port, None, '/', None,
@@ -1364,6 +1414,19 @@ def admin_project_install(template_key):
         flash(f'No se pudo instalar {name}: {error}', 'error')
         return redirect(url_for('admin_project_install_index'))
 
+    wp_warning = None
+    if template_key == 'wordpress':
+        # Deja el WordPress instalado (título, admin, idioma) para poder entrar
+        # directo desde el panel sin pasar por el asistente.
+        wp_sso.ensure(local_folder)
+        wp_user = f'{key}-admin'
+        wp_password, wp_warning = wp_sso.complete_install(
+            [f'http://{key}-app', f'http://host.docker.internal:{port}'],
+            f'http://{get_public_host()}:{port}/', name, current_admin_email() or get_certbot_email(), wp_user,
+        )
+        if wp_password:
+            secrets = {**(secrets or {}), 'wp_admin_user': wp_user, 'wp_admin_password': wp_password}
+
     panel_db.insert_project(
         PORTAL_ROOT, key, name, app_templates.TEMPLATES[template_key]['label'],
         'port', port, None, '/', None,
@@ -1372,6 +1435,8 @@ def admin_project_install(template_key):
     )
     panel_db.log_action(PORTAL_ROOT, current_admin_email(), 'app_install', f'{template_key}: {name}')
     flash(f'{name} instalado y en marcha en el puerto {port}.', 'success')
+    if wp_warning:
+        flash(f'WordPress quedó en marcha, pero falta terminar su instalación desde el navegador: {wp_warning}', 'error')
     return redirect(url_for('admin_projects'))
 
 
@@ -1941,6 +2006,287 @@ def admin_security_revoke_sessions():
     return redirect(url_for('admin_security') + '#sesiones')
 
 
+@app.route('/admin/ssh')
+def admin_ssh():
+    gate = _require_admin()
+    if gate:
+        return gate
+    service = request.args.get('service') or None
+    if service not in ssh_access.SERVICES:
+        service = None
+    try:
+        page = int(request.args.get('page', 1))
+        per = int(request.args.get('per', ssh_access.PAGE_SIZES[0]))
+    except ValueError:
+        page, per = 1, ssh_access.PAGE_SIZES[0]
+    logins = ssh_access.query_logins(
+        PORTAL_ROOT, service=service, q=request.args.get('q', ''),
+        only_new=request.args.get('new') == '1', page=page, per_page=per,
+    )
+    sessions, sessions_error = guard_client.ssh_sessions()
+    params = {
+        'service': service, 'q': logins['q'], 'new': '1' if logins['only_new'] else None,
+        'per': logins['per_page'] if logins['per_page'] != ssh_access.PAGE_SIZES[0] else None,
+    }
+    resp = make_response(render_template(
+        'admin_ssh.html',
+        summary=ssh_access.summary(PORTAL_ROOT),
+        logins=logins,
+        params={k: v for k, v in params.items() if v},
+        known=ssh_access.known_ips(PORTAL_ROOT),
+        services=ssh_access.SERVICES,
+        sessions=sessions,
+        sessions_error=sessions_error,
+        retention_days=ssh_access.LOGIN_RETENTION_DAYS,
+        my_ip=g.client_ip,
+    ))
+    return _no_cache(resp)
+
+
+@app.route('/admin/ssh/sessions/terminate', methods=['POST'])
+def admin_ssh_terminate():
+    gate = _require_admin()
+    if gate:
+        return gate
+    session_id = request.form.get('session_id', '')
+    host = request.form.get('host', '')
+    ok, message = guard_client.ssh_terminate(session_id)
+    if not ok:
+        flash(f'No se pudo cerrar la sesión: {message}', 'error')
+        return redirect(url_for('admin_ssh') + '#sesiones')
+    panel_db.log_action(PORTAL_ROOT, current_admin_email(), 'ssh_session_terminated', message)
+    flash(message + '.', 'success')
+    if request.form.get('ban') == '1' and host:
+        duration = _BAN_DURATIONS['1440']
+        cidr, error = security.manual_ban(
+            PORTAL_ROOT, host, duration[1], f'Sesión SSH {session_id} cerrada desde el panel',
+            current_admin_email(), g.client_ip,
+        )
+        if cidr:
+            panel_db.log_action(PORTAL_ROOT, current_admin_email(), 'ip_banned_manual', f'{cidr} · {duration[0]}')
+            flash(f'{cidr} bloqueada (24 horas).', 'success')
+        else:
+            flash(f'La sesión se cerró, pero no se bloqueó la IP: {error}', 'error')
+    return redirect(url_for('admin_ssh') + '#sesiones')
+
+
+# --- usuarios, claves y sshd del servidor (stackpanel-sshadm) ---------------
+
+SSH_UNLOCK_MINUTES = 10
+_SSHD_FIELDS = ('PermitRootLogin', 'PasswordAuthentication', 'MaxAuthTries', 'X11Forwarding')
+
+
+def _ssh_unlocked_left():
+    """Segundos que le quedan al desbloqueo de la gestión SSH (0 = bloqueada)."""
+    return max(0, int(session.get('ssh_unlock_until', 0)) - int(time.time()))
+
+
+def _ssh_require_unlock(back):
+    """Las acciones sobre cuentas y sshd piden la contraseña del panel (y 2FA)
+    de nuevo: una sesión robada no alcanza para crear un usuario con sudo."""
+    if _ssh_unlocked_left():
+        return None
+    flash(f'Por seguridad, confirma tu identidad para gestionar SSH (vale {SSH_UNLOCK_MINUTES} minutos).', 'error')
+    return redirect(back)
+
+
+def _ssh_back(default):
+    back = request.form.get('back', '')
+    if not back.startswith('/admin/ssh') or '//' in back or '\\' in back:
+        return default
+    return back
+
+
+def _ssh_run(cmd, back, audit, **args):
+    ok, message = sshadm_client.run(cmd, **args)
+    if ok:
+        panel_db.log_action(PORTAL_ROOT, current_admin_email(), audit, message)
+        flash(message + '.', 'success')
+    else:
+        flash(message, 'error')
+    return redirect(back), ok
+
+
+@app.route('/admin/ssh/unlock', methods=['POST'])
+def admin_ssh_unlock():
+    gate = _require_admin()
+    if gate:
+        return gate
+    back = _ssh_back(url_for('admin_ssh_users'))
+    email = current_admin_email()
+    admin, _ = authenticate(PORTAL_ROOT, email, request.form.get('password', ''))
+    ok = bool(admin) and admin['id'] == get_admin_id()
+    if ok and admin['totp_enabled']:
+        ok = verify_totp(PORTAL_ROOT, admin['id'], request.form.get('code', ''))
+    security.record_attempt(PORTAL_ROOT, g.client_ip, 'reauth', email, ok, request.headers.get('User-Agent', ''))
+    if not ok:
+        flash('Contraseña o código incorrectos.', 'error')
+        return redirect(back)
+    session['ssh_unlock_until'] = int(time.time()) + SSH_UNLOCK_MINUTES * 60
+    panel_db.log_action(PORTAL_ROOT, email, 'ssh_unlocked', g.client_ip)
+    return redirect(back)
+
+
+@app.route('/admin/ssh/lock', methods=['POST'])
+def admin_ssh_lock():
+    gate = _require_admin()
+    if gate:
+        return gate
+    session.pop('ssh_unlock_until', None)
+    return redirect(_ssh_back(url_for('admin_ssh_users')))
+
+
+def _ssh_render(template, **ctx):
+    resp = make_response(render_template(
+        template, unlock_left=_ssh_unlocked_left(), unlock_minutes=SSH_UNLOCK_MINUTES,
+        totp_enabled=get_totp_state(PORTAL_ROOT, get_admin_id())[1], my_ip=g.client_ip, **ctx,
+    ))
+    return _no_cache(resp)
+
+
+@app.route('/admin/ssh/users')
+def admin_ssh_users():
+    gate = _require_admin()
+    if gate:
+        return gate
+    status, error = sshadm_client.status()
+    return _ssh_render('admin_ssh_users.html', st=status, st_error=error)
+
+
+@app.route('/admin/ssh/users/<name>')
+def admin_ssh_user(name):
+    gate = _require_admin()
+    if gate:
+        return gate
+    status, error = sshadm_client.status()
+    user = next((u for u in (status or {}).get('users', []) if u['name'] == name), None)
+    if status and not user:
+        flash(f'No existe el usuario {name} (o es una cuenta del sistema).', 'error')
+        return redirect(url_for('admin_ssh_users'))
+    sessions, _ = guard_client.ssh_sessions()
+    return _ssh_render(
+        'admin_ssh_user.html', st=status, st_error=error, user=user, name=name,
+        user_sessions=[s for s in (sessions or []) if s['user'] == name],
+    )
+
+
+@app.route('/admin/ssh/users/create', methods=['POST'])
+def admin_ssh_user_create():
+    gate = _require_admin()
+    if gate:
+        return gate
+    back = url_for('admin_ssh_users')
+    gate = _ssh_require_unlock(back)
+    if gate:
+        return gate
+    name = (request.form.get('user') or '').strip()
+    password = request.form.get('password', '')
+    if password and password != request.form.get('password2', ''):
+        flash('Las contraseñas no coinciden.', 'error')
+        return redirect(back)
+    resp, ok = _ssh_run(
+        'create_user', back, 'ssh_user_created', user=name, sudo=request.form.get('sudo') == 'on',
+        password=password, key=request.form.get('key', ''), label=request.form.get('label', ''),
+    )
+    return redirect(url_for('admin_ssh_user', name=name)) if ok else resp
+
+
+@app.route('/admin/ssh/users/<name>/<action>', methods=['POST'])
+def admin_ssh_user_action(name, action):
+    gate = _require_admin()
+    if gate:
+        return gate
+    back = url_for('admin_ssh_user', name=name)
+    gate = _ssh_require_unlock(back)
+    if gate:
+        return gate
+    f = request.form
+    if action == 'add-key':
+        return _ssh_run('add_key', back, 'ssh_key_added', user=name, key=f.get('key', ''), label=f.get('label', ''))[0]
+    if action == 'remove-key':
+        return _ssh_run('remove_key', back, 'ssh_key_removed', user=name, fingerprint=f.get('fingerprint', ''))[0]
+    if action == 'password':
+        if f.get('password', '') != f.get('password2', ''):
+            flash('Las contraseñas no coinciden.', 'error')
+            return redirect(back)
+        return _ssh_run('set_password', back, 'ssh_password_set', user=name, password=f.get('password', ''))[0]
+    if action == 'sudo':
+        return _ssh_run('set_sudo', back, 'ssh_sudo_changed', user=name, enabled=f.get('enabled') == '1')[0]
+    if action == 'delete':
+        if f.get('confirm_name', '') != name:
+            flash(f'Para borrar, escribe exactamente el nombre del usuario ({name}).', 'error')
+            return redirect(back)
+        resp, ok = _ssh_run('delete_user', back, 'ssh_user_deleted', user=name, remove_home=f.get('remove_home') == 'on')
+        return redirect(url_for('admin_ssh_users')) if ok else resp
+    abort(404)
+
+
+def _sshd_login_since(applied_at):
+    """Primer acceso SSH correcto registrado después de aplicar el cambio."""
+    if not applied_at:
+        return None
+    with panel_db._connect(PORTAL_ROOT) as conn:
+        row = conn.execute(
+            "SELECT ts, ip, email, detail FROM auth_events WHERE success = 1 AND service = 'sshd' AND ts > ? "
+            'ORDER BY id LIMIT 1',
+            (applied_at,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+@app.route('/admin/ssh/config')
+def admin_ssh_config():
+    gate = _require_admin()
+    if gate:
+        return gate
+    status, error = sshadm_client.status()
+    pending = (status or {}).get('pending')
+    return _ssh_render(
+        'admin_ssh_config.html', st=status, st_error=error, pending=pending,
+        login_seen=_sshd_login_since(pending['applied_at']) if pending else None,
+    )
+
+
+@app.route('/admin/ssh/config/check')
+def admin_ssh_config_check():
+    gate = _require_admin()
+    if gate:
+        return jsonify({'error': 'auth'}), 401
+    status, _ = sshadm_client.status()
+    pending = (status or {}).get('pending')
+    login = _sshd_login_since(pending['applied_at']) if pending else None
+    return jsonify({'pending': bool(pending), 'seconds_left': (pending or {}).get('seconds_left', 0), 'login': login})
+
+
+@app.route('/admin/ssh/config/<action>', methods=['POST'])
+def admin_ssh_config_action(action):
+    gate = _require_admin()
+    if gate:
+        return gate
+    back = url_for('admin_ssh_config')
+    if action == 'revert':
+        # Volver atrás nunca necesita desbloqueo: es la salida segura.
+        return _ssh_run('sshd_revert', back, 'sshd_reverted')[0]
+    gate = _ssh_require_unlock(back)
+    if gate:
+        return gate
+    if action == 'apply':
+        settings = {k: request.form.get(k, '') for k in _SSHD_FIELDS}
+        return _ssh_run('sshd_propose', back, 'sshd_proposed', settings=settings)[0]
+    if action == 'confirm':
+        status, error = sshadm_client.status()
+        pending = (status or {}).get('pending')
+        if not pending:
+            flash('No hay cambios pendientes: el plazo ya venció y se revirtieron.', 'error')
+            return redirect(back)
+        if not _sshd_login_since(pending['applied_at']):
+            flash('Todavía no se registró ningún acceso SSH nuevo. Abre una conexión nueva '
+                  '(sin cerrar la actual) y vuelve a intentarlo.', 'error')
+            return redirect(back)
+        return _ssh_run('sshd_confirm', back, 'sshd_confirmed')[0]
+    abort(404)
+
+
 @app.route('/admin/proxy')
 def admin_proxy():
     gate = _require_admin()
@@ -2247,33 +2593,13 @@ def admin_backup_delete(filename):
     return redirect(url_for('admin_backups'))
 
 
-def _svg_points(values, width=760, height=140):
-    values = [v if v is not None else 0 for v in values]
-    if not values:
-        return ''
-    n = len(values)
-    step = width / max(n - 1, 1)
-    points = []
-    for i, v in enumerate(values):
-        x = round(i * step, 1)
-        y = round(height - (min(max(v, 0), 100) / 100 * height), 1)
-        points.append(f'{x},{y}')
-    return ' '.join(points)
-
-
 @app.route('/admin/resources')
 def admin_resources():
     gate = _require_admin()
     if gate:
         return gate
-    history = panel_db.list_metrics_history(PORTAL_ROOT, hours=24)
-    cpu_points = _svg_points([h['cpu_percent'] for h in history])
-    mem_points = _svg_points([h['mem_percent'] for h in history])
-    disk_points = _svg_points([h['disk_percent'] for h in history])
-    return render_template(
-        'admin_resources.html', history=history,
-        cpu_points=cpu_points, mem_points=mem_points, disk_points=disk_points,
-    )
+    data = resource_charts.build(PORTAL_ROOT, request.args.get('range', resource_charts.DEFAULT_RANGE))
+    return render_template('admin_resources.html', data=data)
 
 
 @app.route('/admin/audit')

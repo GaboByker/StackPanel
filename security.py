@@ -63,6 +63,7 @@ SERVICE_LABELS = {'panel': 'Panel', 'sshd': 'SSH', 'sftp': 'SFTP', 'nginx': 'Web
 _CONTAINER_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$')
 
 EVENT_RETENTION_DAYS = 30
+LOGIN_RETENTION_DAYS = 365
 RECIDIVE_LOOKBACK_DAYS = 30
 _PENDING_2FA_MAX_TRIES = 5
 
@@ -591,8 +592,15 @@ def summary(root):
 
 def prune(root):
     cutoff = _iso(_now() - timedelta(days=EVENT_RETENTION_DAYS))
+    # Los accesos SSH/SFTP correctos son el historial de /admin/ssh: se
+    # guardan más tiempo (son pocos comparados con los intentos fallidos).
+    login_cutoff = _iso(_now() - timedelta(days=LOGIN_RETENTION_DAYS))
     with _connect(root) as conn:
-        conn.execute('DELETE FROM auth_events WHERE ts < ?', (cutoff,))
+        conn.execute(
+            "DELETE FROM auth_events WHERE ts < ? AND NOT (success = 1 AND service IN ('sshd', 'sftp'))",
+            (cutoff,),
+        )
+        conn.execute('DELETE FROM auth_events WHERE ts < ?', (login_cutoff,))
 
 
 # --- gráfico de ataques -------------------------------------------------------

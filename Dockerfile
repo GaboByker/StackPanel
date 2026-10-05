@@ -11,7 +11,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY portal-server.py auth.py docker_control.py system_monitor.py panel_db.py proxy_control.py \
      docker_ops.py sftp_control.py backup_control.py files_control.py app_templates.py project_scan.py \
-     project_git.py notification_control.py security.py guard_client.py firewall_rules.py site_presets.py db_viewer.py db_autodetect.py scheduler.py ./
+     project_git.py notification_control.py security.py guard_client.py sshadm_client.py firewall_rules.py ssh_access.py wp_sso.py resource_charts.py site_presets.py db_viewer.py db_autodetect.py scheduler.py ./
 COPY templates/ templates/
 COPY static/ static/
 

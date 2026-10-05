@@ -24,6 +24,8 @@
 
 {% macro icon_bolt(cls='icon') %}{{ _svg('<path d="M13 2 4 14h6l-1 8 9-12h-6l1-8z"/>', cls=cls) }}{% endmacro %}
 
+{% macro icon_terminal(cls='icon') %}{{ _svg('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9l3 3-3 3"/><path d="M12.5 15H17"/>', cls=cls) }}{% endmacro %}
+
 {% macro icon_code(cls='icon') %}{{ _svg('<path d="M9 8l-4 4 4 4"/><path d="M15 8l4 4-4 4"/>', cls=cls) }}{% endmacro %}
 
 {% macro icon_database(cls='icon') %}{{ _svg('<ellipse cx="12" cy="5.5" rx="7" ry="2.5"/><path d="M5 5.5v13c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5v-13"/><path d="M5 12c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5"/>', cls=cls) }}{% endmacro %}

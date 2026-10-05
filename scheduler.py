@@ -14,6 +14,7 @@ import notification_control
 import panel_db
 import proxy_control
 import security
+import ssh_access
 from system_monitor import get_system_metrics
 
 _STARTED = False
@@ -44,6 +45,7 @@ def _loop(root, stack_root, backups_dir):
                 _daily_proxy_reload(root)
             _run_scheduled_backups(root, stack_root, backups_dir)
             security.notify_pending_bans(root)
+            ssh_access.notify_new_ips(root)
         except Exception:
             pass
         tick += 1
@@ -51,9 +53,11 @@ def _loop(root, stack_root, backups_dir):
 
 
 def _sample_metrics(root):
-    host = (get_system_metrics() or {}).get('host', {})
+    metrics = get_system_metrics() or {}
+    host = metrics.get('host', {})
     panel_db.add_metrics_sample(
         root, host.get('cpu_used_percent'), host.get('memory_used_percent'), host.get('disk_used_percent'),
+        host=host, projects=metrics.get('projects') or [],
     )
 
 

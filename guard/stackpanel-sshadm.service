@@ -1,0 +1,39 @@
+[Unit]
+Description=StackPanel sshadm (usuarios, claves y sshd desde el panel)
+Documentation=file:///usr/local/lib/stackpanel-guard/stackpanel_sshadm.py
+After=local-fs.target ssh.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /usr/local/lib/stackpanel-guard/stackpanel_sshadm.py
+Restart=always
+RestartSec=3
+
+RuntimeDirectory=stackpanel-sshadm
+RuntimeDirectoryMode=0750
+RuntimeDirectoryPreserve=yes
+# Cambio de sshd a prueba (para revertirlo aunque el agente se reinicie).
+StateDirectory=stackpanel-sshadm
+
+# Administra cuentas: necesita escribir en /etc (passwd, shadow, group,
+# ssh/sshd_config.d) y /home, cambiar dueños y cerrar procesos de un
+# usuario al borrarlo. Nada de red: solo el socket Unix del panel.
+CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH CAP_FOWNER CAP_FSETID CAP_KILL CAP_SETUID CAP_SETGID CAP_AUDIT_WRITE
+ProtectSystem=strict
+ProtectHome=no
+ReadWritePaths=/etc /home /var/mail /var/spool/mail /var/log /run/stackpanel-sshadm
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_UNIX AF_NETLINK
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

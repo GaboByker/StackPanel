@@ -1,0 +1,74 @@
+{% extends "base_admin.html" %}
+{% from '_ssh_nav.html' import ssh_tabs, unlock_card, agent_down with context %}
+{% block title %}Usuarios y claves SSH{% endblock %}
+{% block heading %}Accesos SSH{% endblock %}
+{% block content %}
+{{ ssh_tabs('users') }}
+
+{% if not st %}
+{{ agent_down(st_error) }}
+{% else %}
+{% if st.disabled %}
+<p class="admin-hint" style="color:var(--danger-text);"><strong>Gestión desactivada en el servidor</strong> (existe <code>/etc/stackpanel-sshadm/disabled</code>): solo se puede consultar.</p>
+{% endif %}
+{{ unlock_card('/admin/ssh/users') }}
+
+<p class="admin-hint">
+	Cuentas normales del servidor (las del sistema y <code>root</code> no se administran aquí). Para entrar por SSH una cuenta necesita una <strong>clave</strong>{% if st.sshd.PasswordAuthentication == 'yes' %} o una <strong>contraseña</strong>{% endif %}.
+	{% if st.protected %}Protegidos (no se pueden borrar ni quitar de sudo): {% for p in st.protected %}<code>{{ p }}</code>{{ ', ' if not loop.last else '' }}{% endfor %}.{% endif %}
+</p>
+{% set pass_ok = st.sshd.PasswordAuthentication == 'yes' %}
+<div class="admin-table-wrap">
+	<table class="admin-table">
+		<thead><tr><th>Usuario</th><th>sudo</th><th>Claves</th><th>Contraseña</th><th>Puede entrar por SSH</th><th><span class="sr-only">Acciones</span></th></tr></thead>
+		<tbody>
+			{% for u in st.users %}
+			{% set can = (u['keys'] > 0) or (u.password == 'set' and pass_ok) %}
+			<tr>
+				<td class="nowrap"><a href="/admin/ssh/users/{{ u.name }}"><strong>{{ u.name }}</strong></a>{% if u.name in st.protected %} <span class="status-pill custom">Protegido</span>{% endif %}<br/><small class="admin-hint">{{ u.home }}</small></td>
+				<td>{% if u.sudo %}<span class="status-pill pending">sudo</span>{% else %}—{% endif %}</td>
+				<td>{{ u['keys'] }}{% if u.keys_error %}<br/><small class="admin-hint" style="color:var(--danger-text);">{{ u.keys_error }}</small>{% endif %}</td>
+				<td>{{ {'set': 'Sí', 'locked': 'Bloqueada', 'none': 'No'}[u.password] }}{% if u.password == 'set' and not pass_ok %}<br/><small class="admin-hint">SSH no acepta contraseñas</small>{% endif %}</td>
+				<td>{% if can %}<span class="status-pill running">Sí</span>{% else %}<span class="status-pill stopped">No</span>{% endif %}</td>
+				<td><a class="btn btn-secondary btn-sm" href="/admin/ssh/users/{{ u.name }}">Gestionar</a></td>
+			</tr>
+			{% else %}
+			<tr><td colspan="6" class="htop-loading">No hay cuentas normales.</td></tr>
+			{% endfor %}
+		</tbody>
+	</table>
+</div>
+
+<h2 class="landing-section-title" id="crear" style="margin-top:28px;">Crear usuario</h2>
+<form method="post" action="/admin/ssh/users/create" class="admin-service-card" autocomplete="off">
+	<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+	<div class="ssh-grid">
+		<div>
+			<label class="ssh-field"><span>Nombre de usuario</span>
+				<input type="text" name="user" required pattern="[a-z_][a-z0-9_\-]{0,31}" maxlength="32" placeholder="ej. ana" autocapitalize="off" spellcheck="false"/></label>
+			<p class="admin-hint" style="margin-top:-4px;">Minúsculas, números, <code>_</code> o <code>-</code>, empezando por letra.</p>
+			<label class="checkbox-row" style="margin:6px 0 10px;"><input type="checkbox" name="sudo"/> Dar permisos de administrador (sudo)</label>
+			<p class="admin-hint">Con sudo, el usuario puede hacer <strong>cualquier cosa</strong> en el servidor. Necesita contraseña, porque sudo la pide.</p>
+		</div>
+		<div>
+			<label class="ssh-field"><span>Clave pública SSH (recomendado)</span>
+				<textarea name="key" rows="3" class="input-code" placeholder="ssh-ed25519 AAAA... ana@portatil" spellcheck="false"></textarea></label>
+			<label class="ssh-field"><span>Nombre de la clave (opcional)</span>
+				<input type="text" name="label" maxlength="80" placeholder="ej. portátil de Ana"/></label>
+		</div>
+		<div>
+			<label class="ssh-field"><span>Contraseña (mín. {{ st.min_password }} caracteres)</span>
+				<input type="password" name="password" minlength="{{ st.min_password }}" autocomplete="new-password"/></label>
+			<label class="ssh-field"><span>Repetir contraseña</span>
+				<input type="password" name="password2" minlength="{{ st.min_password }}" autocomplete="new-password"/></label>
+			<p class="admin-hint">Opcional si pones una clave y no le das sudo.</p>
+		</div>
+	</div>
+	<div class="ssh-actions">
+		<button type="submit" class="btn btn-primary" {{ 'disabled' if not unlock_left or st.disabled else '' }}>Crear usuario</button>
+		{% if not unlock_left %}<span class="admin-hint">Desbloquea arriba para crear usuarios.</span>{% endif %}
+	</div>
+</form>
+<p class="admin-hint" style="margin-top:12px;">¿Cómo se consigue la clave pública? En el ordenador de la persona: <code>ssh-keygen -t ed25519</code> y luego copiar el contenido de <code>~/.ssh/id_ed25519.pub</code>. La clave privada (sin <code>.pub</code>) nunca se comparte.</p>
+{% endif %}
+{% endblock %}

@@ -94,35 +94,6 @@
 	</div>
 </div>
 
-<style>
-.viz-root {
-	--series-1: #2a78d6; --series-2: #eb6834; --series-3: #1baf7a; --series-4: #eda100;
-}
-@media (prefers-color-scheme: dark) {
-	:root:where(:not([data-theme="light"])) .viz-root {
-		--series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --series-4: #c98500;
-	}
-}
-:root[data-theme="dark"] .viz-root {
-	--series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --series-4: #c98500;
-}
-.viz-root .s1 { fill: var(--series-1); } .viz-root .s2 { fill: var(--series-2); }
-.viz-root .s3 { fill: var(--series-3); } .viz-root .s4 { fill: var(--series-4); }
-.viz-legend { display:flex; flex-wrap:wrap; gap:6px 16px; margin:0 0 8px; font-size:var(--fs-xs); color:var(--text); }
-.viz-legend span { display:inline-flex; align-items:center; gap:6px; }
-.viz-swatch { width:10px; height:10px; border-radius:3px; display:inline-block; }
-.viz-legend .viz-total { color:var(--text-muted); }
-.viz-plot { position:relative; }
-.viz-plot svg { display:block; width:100%; height:auto; }
-.viz-axis { fill:var(--text-muted); font-size:11px; font-family:var(--font-mono); }
-.viz-grid { stroke:var(--border); stroke-width:1; }
-.viz-hit { fill:transparent; cursor:default; }
-.viz-hit:hover, .viz-hit.is-active { fill:var(--text); fill-opacity:0.05; }
-.viz-tip { position:absolute; pointer-events:none; background:var(--surface); color:var(--text); border:1px solid var(--border);
-	border-radius:8px; padding:8px 10px; font-size:var(--fs-xs); box-shadow:var(--card-shadow); min-width:140px; display:none; z-index:2; }
-.viz-tip .row { display:flex; align-items:center; gap:6px; justify-content:space-between; }
-.viz-tip .row b { font-variant-numeric:tabular-nums; }
-</style>
 
 <article class="admin-service-card viz-root" id="grafico" style="margin-bottom:16px;">
 	<div class="admin-service-head"><h3 style="margin:0;">Intentos fallidos por hora (últimas 24 h, UTC)</h3></div>

@@ -2,7 +2,7 @@ import json
 import os
 import re
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import site_presets
 
@@ -67,6 +67,7 @@ def init_db(root):
             '''
         )
         _migrate_projects_columns(conn)
+        _migrate_metrics_columns(conn)
         # Datos propios de esta instalación, si existen (site_presets.py).
         _seed_sites(conn)
         _seed_projects(conn)
@@ -85,6 +86,21 @@ def init_db(root):
                 disk_percent REAL
             )
             '''
+        )
+        conn.execute(
+            '''
+            CREATE TABLE IF NOT EXISTS project_metrics_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts TEXT NOT NULL,
+                project_key TEXT NOT NULL,
+                label TEXT,
+                cpu_percent REAL,
+                memory_bytes INTEGER
+            )
+            '''
+        )
+        conn.execute(
+            'CREATE INDEX IF NOT EXISTS idx_project_metrics_ts ON project_metrics_history (ts)'
         )
         conn.execute(
             '''
@@ -150,6 +166,16 @@ def _migrate_projects_columns(conn):
     for column, ddl in additions.items():
         if column not in existing:
             conn.execute(ddl)
+
+
+def _migrate_metrics_columns(conn):
+    existing = {row[1] for row in conn.execute('PRAGMA table_info(metrics_history)')}
+    for column, kind in (
+        ('cpus', 'INTEGER'), ('mem_used_bytes', 'INTEGER'), ('mem_total_bytes', 'INTEGER'),
+        ('disk_used_bytes', 'INTEGER'), ('disk_total_bytes', 'INTEGER'),
+    ):
+        if column not in existing:
+            conn.execute(f'ALTER TABLE metrics_history ADD COLUMN {column} {kind}')
 
 
 def _backfill_known_projects(conn):
@@ -478,22 +504,51 @@ def set_settings(root, values):
 
 # --- historial de métricas ------------------------------------------------
 
-def add_metrics_sample(root, cpu_percent, mem_percent, disk_percent):
+def _metrics_cutoff(hours):
+    # Los ts se guardan en ISO con 'T'; comparar contra datetime('now') de SQLite
+    # (con espacio) dejaba pasar filas de hasta un día de más.
+    return (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+
+
+def add_metrics_sample(root, cpu_percent, mem_percent, disk_percent, host=None, projects=()):
+    host = host or {}
+    ts = _now()
     with _connect(root) as conn:
         conn.execute(
-            'INSERT INTO metrics_history (ts, cpu_percent, mem_percent, disk_percent) VALUES (?, ?, ?, ?)',
-            (_now(), cpu_percent, mem_percent, disk_percent),
+            'INSERT INTO metrics_history (ts, cpu_percent, mem_percent, disk_percent, cpus, '
+            'mem_used_bytes, mem_total_bytes, disk_used_bytes, disk_total_bytes) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            (
+                ts, cpu_percent, mem_percent, disk_percent, host.get('cpus'),
+                host.get('memory_used_bytes'), host.get('memory_total_bytes'),
+                host.get('disk_used_bytes'), host.get('disk_total_bytes'),
+            ),
         )
-        conn.execute(
-            "DELETE FROM metrics_history WHERE ts < datetime('now', '-7 days')"
+        conn.executemany(
+            'INSERT INTO project_metrics_history (ts, project_key, label, cpu_percent, memory_bytes) '
+            'VALUES (?, ?, ?, ?, ?)',
+            [(ts, p['key'], p.get('label'), p.get('cpu_percent'), p.get('memory_bytes')) for p in projects],
         )
+        cutoff = _metrics_cutoff(7 * 24)
+        conn.execute('DELETE FROM metrics_history WHERE ts < ?', (cutoff,))
+        conn.execute('DELETE FROM project_metrics_history WHERE ts < ?', (cutoff,))
 
 
 def list_metrics_history(root, hours=24):
     with _connect(root) as conn:
         rows = conn.execute(
-            "SELECT * FROM metrics_history WHERE ts >= datetime('now', ?) ORDER BY ts",
-            (f'-{hours} hours',),
+            'SELECT * FROM metrics_history WHERE ts >= ? ORDER BY ts',
+            (_metrics_cutoff(hours),),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def list_project_metrics_history(root, hours=24):
+    with _connect(root) as conn:
+        rows = conn.execute(
+            'SELECT ts, project_key, label, cpu_percent, memory_bytes FROM project_metrics_history '
+            'WHERE ts >= ? ORDER BY ts',
+            (_metrics_cutoff(hours),),
         ).fetchall()
     return [dict(row) for row in rows]
 
