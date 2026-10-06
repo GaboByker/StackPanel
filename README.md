@@ -49,6 +49,18 @@ Para instalar en otra carpeta o rama:
 STACKPANEL_DIR=/otra/ruta STACKPANEL_BRANCH=main curl -fsSL https://raw.githubusercontent.com/GaboByker/StackPanel/main/install.sh | bash
 ```
 
+### HTTPS y cookie segura
+
+Por defecto el panel se sirve por HTTP (`http://TU_IP:5005`). Mientras sea así, la cookie de sesión del admin viaja sin cifrar y alguien en la red podría robarla para entrar como vos. En cuanto tengas un dominio y sirvas el panel por HTTPS (el proxy Nginx + Let's Encrypt del propio StackPanel puede emitir el certificado), activá la cookie segura en el `.env`:
+
+```bash
+PORTAL_COOKIE_SECURE=1
+```
+
+Con eso la cookie solo se manda por conexiones cifradas. Dejalo en `0` mientras sigas en HTTP: si lo ponés en `1` sin HTTPS, el navegador no enviará la cookie y no vas a poder iniciar sesión. Si el panel queda detrás de un proxy, poné además en `PORTAL_TRUSTED_PROXIES` la IP o rango de ese proxy, para que los bloqueos usen la IP real del visitante. Aplicá los cambios con `docker compose up -d --build portal`.
+
+> ¿Todavía sin dominio? Podés usar un hostname gratis tipo `TU-IP.sslip.io` para emitir el certificado y pasar a HTTPS sin comprar nada.
+
 ### Firewall del servidor (stackpanel-guard)
 
 El panel corre en Docker y no tiene permisos sobre la red. Los bloqueos y las reglas de puertos los aplica un agente pequeño en el host, `stackpanel-guard` (servicio de systemd, Python sin dependencias, nftables). El instalador lo instala solo, con `sudo`. Si no pudo, corré desde la carpeta del panel:
