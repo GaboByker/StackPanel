@@ -92,6 +92,23 @@ if [ ! -f .env ]; then
     rm -f .env.bak
 else
     echo "==> Ya existe un .env, lo dejo como está."
+    # Aun así, nos aseguramos de que tenga una PORTAL_SECRET_KEY fuerte: un
+    # .env viejo (o copiado a mano del .env.example) podría traerla con el
+    # placeholder, vacía o sin la línea, y entonces el panel firmaría las
+    # sesiones con una clave conocida (cualquiera podría falsificar un admin).
+    CURRENT_SECRET=$(grep '^PORTAL_SECRET_KEY=' .env | cut -d= -f2- || true)
+    case "${CURRENT_SECRET}" in
+        ""|"cambia-esta-clave"|"portal-docker-dev"|"portal-dev-change-me")
+            echo "==> PORTAL_SECRET_KEY ausente o insegura: genero una nueva."
+            SECRET=$(openssl rand -hex 32 2>/dev/null || head -c32 /dev/urandom | od -An -tx1 | tr -d ' \n')
+            if grep -q '^PORTAL_SECRET_KEY=' .env; then
+                sed -i.bak "s#^PORTAL_SECRET_KEY=.*#PORTAL_SECRET_KEY=${SECRET}#" .env
+                rm -f .env.bak
+            else
+                echo "PORTAL_SECRET_KEY=${SECRET}" >> .env
+            fi
+            ;;
+    esac
 fi
 
 # Puerto del panel: si el que hay en .env (o el default 5005) está ocupado,

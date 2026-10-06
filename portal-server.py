@@ -8,6 +8,7 @@ import shutil
 import sqlite3
 import time
 from datetime import datetime, timedelta, timezone
+from urllib.parse import urlparse
 
 from flask import (
     Flask,
@@ -191,9 +192,12 @@ scheduler.start(PORTAL_ROOT, STACK_ROOT, BACKUPS_DIR)
 @app.errorhandler(CSRFError)
 def handle_csrf_error(e):
     flash('El formulario expiró por inactividad. Volvé a intentar la acción.', 'error')
-    next_url = request.referrer
-    if next_url and next_url.startswith(request.host_url):
-        return redirect(next_url)
+    # Se vuelve solo a la ruta relativa del referrer y únicamente si es del
+    # mismo host, para no reenviar a un dominio externo (open redirect).
+    ref = urlparse(request.referrer or '')
+    if ref.netloc == urlparse(request.host_url).netloc and ref.path:
+        back = ref.path + (f'?{ref.query}' if ref.query else '')
+        return redirect(_safe_next(back))
     return redirect(url_for('admin_panel') if get_admin_id() else url_for('admin_login'))
 
 

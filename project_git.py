@@ -15,6 +15,7 @@ por ese nombre sin que la URL pública tenga nada que ver."""
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import tarfile
@@ -24,15 +25,40 @@ import docker_ops
 _ENTRY_CANDIDATES_PY = ['app.py', 'main.py', 'wsgi.py', 'server.py']
 _STATIC_SUBDIRS = ('', 'public', 'dist', 'build')
 
+# Esquemas de git que pueden ejecutar comandos arbitrarios en el host
+# (ext:: lanza un proceso; file::/local permiten leer repos del propio
+# servidor). Solo se admiten repositorios remotos por http(s), ssh o git.
+_ALLOWED_URL_RE = re.compile(r'^(https?|git|ssh)://', re.IGNORECASE)
+_SCP_LIKE_RE = re.compile(r'^[A-Za-z0-9._-]+@[A-Za-z0-9._-]+:')
+
+
+def _validate_clone_ref(url, branch):
+    """Rechaza URLs/ramas peligrosas antes de pasarlas a git: una url o rama
+    que empiece por '-' git la interpretaría como una opción (inyección de
+    argumentos), y el esquema ext:: permite ejecutar comandos en el host."""
+    url = (url or '').strip()
+    if not url or url.startswith('-'):
+        return 'URL de repositorio no válida.'
+    if not (_ALLOWED_URL_RE.match(url) or _SCP_LIKE_RE.match(url)):
+        return 'Solo se admiten repositorios http(s), ssh o git remotos.'
+    if branch and branch.startswith('-'):
+        return 'Nombre de rama no válido.'
+    return None
+
 
 def clone_repo(url, branch, dest):
     if os.path.exists(dest):
         return False, f'La carpeta {dest} ya existe.'
+    err = _validate_clone_ref(url, branch)
+    if err:
+        return False, err
     os.makedirs(os.path.dirname(dest) or '.', exist_ok=True)
     cmd = ['git', 'clone', '--depth', '1']
     if branch:
         cmd += ['--branch', branch]
-    cmd += [url, dest]
+    # El '--' cierra la lista de opciones: aunque url o dest llegaran a
+    # empezar por '-', git los trata como rutas y no como banderas.
+    cmd += ['--', url, dest]
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
     except subprocess.TimeoutExpired:

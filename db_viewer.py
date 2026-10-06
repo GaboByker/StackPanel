@@ -5,7 +5,57 @@ permitir escritura."""
 import re
 
 SAFE_IDENT_RE = re.compile(r'^[A-Za-z0-9_]+$')
-_WRITE_RE = re.compile(r'^\s*(insert|update|delete|drop|alter|create|truncate|grant|revoke)\b', re.IGNORECASE)
+_WRITE_RE = re.compile(r'^(insert|update|delete|drop|alter|create|truncate|grant|revoke|replace|merge)\b', re.IGNORECASE)
+# Comentarios y espacios iniciales que podrían ocultar la palabra clave de
+# escritura (p. ej. "/*x*/DELETE …" o "-- x\nDROP …") antes del chequeo.
+_LEADING_NOISE_RE = re.compile(r'^(\s+|/\*.*?\*/|--[^\n]*\n?|#[^\n]*\n?)', re.DOTALL)
+
+
+def _is_write_query(sql):
+    """True si la consulta modifica datos, saltándose comentarios/espacios
+    iniciales. Conservador: ante la duda (varias sentencias), la trata como
+    escritura para no romper la promesa de 'solo lectura'."""
+    text = sql or ''
+    prev = None
+    while text != prev:
+        prev = text
+        text = _LEADING_NOISE_RE.sub('', text, count=1)
+    if _WRITE_RE.match(text):
+        return True
+    # Varias sentencias encadenadas: basta con que una escriba (psycopg2 las
+    # ejecuta todas en un solo execute). El ';' final suelto no cuenta.
+    return len(_split_statements(text)) > 1
+
+
+def _split_statements(text):
+    """Separa por ';' respetando comillas simples/dobles y comentarios, para
+    no partir un literal que contenga ';'."""
+    stmts, buf = [], []
+    i, n = 0, len(text)
+    quote = None
+    while i < n:
+        ch = text[i]
+        if quote:
+            buf.append(ch)
+            if ch == quote:
+                quote = None
+            i += 1
+            continue
+        if ch in ("'", '"'):
+            quote = ch
+            buf.append(ch)
+        elif ch == ';':
+            stmt = ''.join(buf).strip()
+            if stmt:
+                stmts.append(stmt)
+            buf = []
+        else:
+            buf.append(ch)
+        i += 1
+    tail = ''.join(buf).strip()
+    if tail:
+        stmts.append(tail)
+    return stmts
 
 
 def _connect(db):
@@ -73,7 +123,7 @@ def browse_table(db, table, limit=100):
 
 
 def run_query(db, sql, allow_write=False):
-    if not allow_write and _WRITE_RE.match(sql or ''):
+    if not allow_write and _is_write_query(sql):
         return None, None, 'Esta conexión es de solo lectura. Activa "permitir escritura" para correr esto.'
     try:
         conn = _connect(db)

@@ -10,7 +10,7 @@ DOMAIN_RE = re.compile(
     r'^(?=.{1,253}$)(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,63}$'
 )
 KEY_RE = re.compile(r'^[a-z0-9][a-z0-9-]{0,63}$')
-# Hostname/IP para el destino interno de un sitio del proxy (ej. "torres",
+# Hostname/IP para el destino interno de un sitio del proxy (ej. "backend",
 # "host.docker.internal", "10.0.0.5"). Deliberadamente estricto: esto se
 # inserta tal cual dentro de un archivo .conf de nginx, así que no puede
 # llevar espacios, comillas, llaves ni saltos de línea.
