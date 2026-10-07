@@ -340,4 +340,5 @@ Comandos útiles (desde ${INSTALL_DIR}):
     docker compose logs -f portal   # ver logs
     docker compose down             # apagar
     docker compose up -d --build    # actualizar/reiniciar
+    ./uninstall.sh                  # desinstalar (deja todo como estaba)
 MSG

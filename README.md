@@ -49,6 +49,18 @@ Para instalar en otra carpeta o rama:
 STACKPANEL_DIR=/otra/ruta STACKPANEL_BRANCH=main curl -fsSL https://raw.githubusercontent.com/GaboByker/StackPanel/main/install.sh | bash
 ```
 
+Si no querés el logo de StackPanel en el mensaje de bienvenida de SSH, instalá con `STACKPANEL_MOTD=0`.
+
+### Desinstalar
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/GaboByker/StackPanel/main/uninstall.sh | bash
+```
+
+Quita los contenedores del panel, los agentes `stackpanel-guard` y `stackpanel-sshadm` con sus reglas de firewall, y el logo del mensaje de SSH. El mensaje de bienvenida del proveedor del VPS vuelve a verse como antes. No toca tus proyectos, los usuarios del sistema ni sus claves. Tus datos quedan en la carpeta del panel; para borrarlos también, agregá `--purge` (`... | bash -s -- --purge`). Con `--dry-run` muestra qué haría sin cambiar nada.
+
+Si cambiaste la configuración de SSH desde el panel, esa configuración se conserva a propósito (quitarla podría cambiar el puerto o el modo de acceso y dejarte fuera); el desinstalador te dice cómo revertirla.
+
 ### HTTPS y cookie segura
 
 Por defecto el panel se sirve por HTTP (`http://TU_IP:5005`). Mientras sea así, la cookie de sesión del admin viaja sin cifrar y alguien en la red podría robarla para entrar como vos. En cuanto tengas un dominio y sirvas el panel por HTTPS (el proxy Nginx + Let's Encrypt del propio StackPanel puede emitir el certificado), activá la cookie segura en el `.env`:
