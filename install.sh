@@ -12,6 +12,7 @@
 #   STACKPANEL_GUARD    0 = no instalar el agente de firewall (stackpanel-guard)
 #   STACKPANEL_SSHADM   0 = no instalar la gestión de usuarios/claves/sshd (stackpanel-sshadm)
 #   STACKPANEL_MOTD     0 = no poner el logo en el mensaje de bienvenida de SSH
+#   STACKPANEL_KEEP_PROVIDER_MOTD  1 = no ocultar el mensaje del proveedor (/etc/motd)
 #   SSHADM_PROTECTED_USERS  usuarios que el panel nunca puede borrar (por defecto, quien instala)
 #   STACKPANEL_SRC      carpeta local con el código, en vez de descargarlo
 #                       (para probar cambios antes de publicarlos)
@@ -258,7 +259,7 @@ if [ "${STACKPANEL_GUARD:-1}" != "0" ]; then
 fi
 
 # Logo de StackPanel al entrar por SSH, justo antes del prompt (después del
-# mensaje de bienvenida del sistema y del proveedor, que no se tocan). STACKPANEL_MOTD=0 para
+# mensaje de bienvenida del sistema). STACKPANEL_MOTD=0 para
 # no instalarlo.
 if [ "${STACKPANEL_MOTD:-1}" != "0" ] && [ -d /etc/profile.d ]; then
     if [ "$(id -u)" = "0" ]; then MOTD_SUDO=""; else MOTD_SUDO="sudo"; fi
@@ -268,6 +269,15 @@ if [ "${STACKPANEL_MOTD:-1}" != "0" ] && [ -d /etc/profile.d ]; then
     # Versiones anteriores lo ponían en update-motd.d (salía arriba de todo).
     if grep -qs 'StackPanel' /etc/update-motd.d/05-stackpanel; then
         ${MOTD_SUDO} rm -f /etc/update-motd.d/05-stackpanel || true
+    fi
+    # El mensaje fijo del proveedor del VPS (/etc/motd) se oculta, guardando
+    # una copia exacta que uninstall.sh vuelve a poner. Solo la primera vez:
+    # si ya hay copia no se pisa. STACKPANEL_KEEP_PROVIDER_MOTD=1 para dejarlo.
+    if [ "${STACKPANEL_KEEP_PROVIDER_MOTD:-0}" != "1" ] && [ -s /etc/motd ] \
+        && [ ! -e /etc/motd.stackpanel-backup ]; then
+        if ${MOTD_SUDO} cp -a /etc/motd /etc/motd.stackpanel-backup; then
+            ${MOTD_SUDO} truncate -s 0 /etc/motd || true
+        fi
     fi
 fi
 

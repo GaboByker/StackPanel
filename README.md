@@ -49,7 +49,7 @@ Para instalar en otra carpeta o rama:
 STACKPANEL_DIR=/otra/ruta STACKPANEL_BRANCH=main curl -fsSL https://raw.githubusercontent.com/GaboByker/StackPanel/main/install.sh | bash
 ```
 
-Al entrar por SSH se muestra el logo de StackPanel justo antes del prompt, después del mensaje de bienvenida del sistema y del proveedor (que no se modifican). Funciona en cualquier Linux con `/etc/profile.d` (Ubuntu, Debian, RHEL/Alma/Rocky, Alpine...); si no existe, simplemente no se instala. Para no instalarlo: `STACKPANEL_MOTD=0`.
+Al entrar por SSH se muestra el logo de StackPanel justo antes del prompt, después del mensaje de bienvenida del sistema. El mensaje fijo del proveedor del VPS (`/etc/motd`) se oculta guardando una copia (`/etc/motd.stackpanel-backup`) que el desinstalador restaura; para dejarlo visible: `STACKPANEL_KEEP_PROVIDER_MOTD=1`. Funciona en cualquier Linux con `/etc/profile.d` (Ubuntu, Debian, RHEL/Alma/Rocky, Alpine...); si no existe, simplemente no se instala. Para no instalarlo: `STACKPANEL_MOTD=0`.
 
 ### Desinstalar
 
@@ -57,7 +57,7 @@ Al entrar por SSH se muestra el logo de StackPanel justo antes del prompt, despu
 curl -fsSL https://raw.githubusercontent.com/GaboByker/StackPanel/main/uninstall.sh | bash
 ```
 
-Quita los contenedores del panel, los agentes `stackpanel-guard` y `stackpanel-sshadm` con sus reglas de firewall, y el logo del mensaje de SSH. El mensaje de bienvenida del proveedor del VPS vuelve a verse como antes. No toca tus proyectos, los usuarios del sistema ni sus claves. Tus datos quedan en la carpeta del panel; para borrarlos también, agregá `--purge` (`... | bash -s -- --purge`). Con `--dry-run` muestra qué haría sin cambiar nada.
+Quita los contenedores del panel, los agentes `stackpanel-guard` y `stackpanel-sshadm` con sus reglas de firewall, y el logo del mensaje de SSH. El mensaje de bienvenida del proveedor del VPS vuelve exactamente como estaba. No toca tus proyectos, los usuarios del sistema ni sus claves. Tus datos quedan en la carpeta del panel; para borrarlos también, agregá `--purge` (`... | bash -s -- --purge`). Con `--dry-run` muestra qué haría sin cambiar nada.
 
 Si cambiaste la configuración de SSH desde el panel, esa configuración se conserva a propósito (quitarla podría cambiar el puerto o el modo de acceso y dejarte fuera); el desinstalador te dice cómo revertirla.
 

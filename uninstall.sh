@@ -17,8 +17,9 @@
 #   STACKPANEL_DIR   directorio de instalación (default: ~/stackpanel)
 #
 # Qué NO toca nunca:
-#   - El mensaje de bienvenida del proveedor del VPS (/etc/motd) ni los demás
-#     scripts de /etc/update-motd.d: solo se quita el logo de StackPanel.
+#   - Los scripts del mensaje de bienvenida del sistema (/etc/update-motd.d):
+#     solo se quita el logo de StackPanel. El mensaje del proveedor del VPS
+#     (/etc/motd), que el instalador ocultó, se restaura desde su copia.
 #   - Los proyectos y contenedores que creaste desde el panel.
 #   - Los usuarios del sistema, sus contraseñas y sus claves SSH.
 #   - La configuración de SSH que hayas cambiado desde el panel
@@ -60,13 +61,13 @@ echo
 echo "Se va a quitar:"
 echo "  - Los contenedores del panel: ${CONTAINERS}"
 echo "  - Los agentes del host stackpanel-guard y stackpanel-sshadm (y sus reglas de firewall)"
-echo "  - El logo de StackPanel del mensaje de bienvenida de SSH"
+echo "  - El logo de StackPanel del mensaje de bienvenida de SSH (y vuelve el mensaje del proveedor)"
 if [ "${PURGE}" = "1" ]; then
     echo "  - La carpeta ${INSTALL_DIR} con TODOS sus datos y los certificados SSL (--purge)"
 elif [ -d "${INSTALL_DIR}" ]; then
     echo "Se conserva la carpeta ${INSTALL_DIR} con tus datos (usá --purge para borrarla)."
 fi
-echo "No se tocan tus proyectos, los usuarios del sistema ni el mensaje del proveedor del VPS."
+echo "No se tocan tus proyectos ni los usuarios del sistema."
 echo
 
 if [ "${ASSUME_YES}" != "1" ] && [ "${DRY_RUN}" != "1" ]; then
@@ -163,6 +164,11 @@ for logo in /etc/profile.d/stackpanel-logo.sh /etc/update-motd.d/05-stackpanel; 
         echo "==> ${logo} no es de StackPanel, lo dejo como está."
     fi
 done
+# El mensaje del proveedor del VPS que ocultó el instalador vuelve tal cual.
+if [ -f /etc/motd.stackpanel-backup ]; then
+    echo "==> Restaurando el mensaje de bienvenida del proveedor (/etc/motd)..."
+    run ${SUDO} mv -f /etc/motd.stackpanel-backup /etc/motd
+fi
 
 # --- Carpeta del panel ---------------------------------------------------------
 if [ "${PURGE}" = "1" ] && [ -d "${INSTALL_DIR}" ]; then
