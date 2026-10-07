@@ -273,8 +273,10 @@ if [ "${STACKPANEL_MOTD:-1}" != "0" ] && [ -d /etc/profile.d ]; then
     # El mensaje fijo del proveedor del VPS (/etc/motd) se oculta, guardando
     # una copia exacta que uninstall.sh vuelve a poner. Solo la primera vez:
     # si ya hay copia no se pisa. STACKPANEL_KEEP_PROVIDER_MOTD=1 para dejarlo.
+    # Si /etc/motd es un enlace (algunas distros lo generan) no se toca, porque
+    # truncate vaciaría el archivo al que apunta.
     if [ "${STACKPANEL_KEEP_PROVIDER_MOTD:-0}" != "1" ] && [ -s /etc/motd ] \
-        && [ ! -e /etc/motd.stackpanel-backup ]; then
+        && [ ! -L /etc/motd ] && [ ! -e /etc/motd.stackpanel-backup ]; then
         if ${MOTD_SUDO} cp -a /etc/motd /etc/motd.stackpanel-backup; then
             ${MOTD_SUDO} truncate -s 0 /etc/motd || true
         fi
