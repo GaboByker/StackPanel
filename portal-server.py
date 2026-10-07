@@ -2655,9 +2655,34 @@ def admin_create_admin():
     return render_template('admin_new.html', error=error)
 
 
+# Logo de StackPanel en ASCII, se muestra al arrancar (docker compose logs).
+ASCII_LOGO = r"""
+                ▄▄██▄▄
+            ▄▄██████████▄▄▄
+       ▄▄▄███████████████████▄▄
+   ▄▄████████████████████████████▄▄
+  ██████████████████████████████████
+  ██████████████████████████████████
+  ▀▀██████████████████████████████▀▀
+  ▄▄  ▀▀█████████▀▀▀▀█████████▀▀  ▄▄
+  ████▄▄ ▀▀█████      █████▀▀ ▄▄████
+  ███████▄▄ ████      ████ ▄▄███████
+  ▀▀█████████████    █████████████▀▀
+  ▄▄  ▀▀█████████    █████████▀▀  ▄▄
+  ████▄▄  ▀▀████      ████▀▀  ▄▄████
+  ████████▄▄████      ████▄▄████████
+  ▀▀██████████████████████████████▀▀
+      ▀████████████████████████▀
+         ▀▀████████████████▀▀
+             ▀██████████▀
+                ▀▀██▀▀
+"""
+
+
 if __name__ == '__main__':
     from waitress import serve
 
+    print(ASCII_LOGO, flush=True)
     print(f'Portal: http://{get_public_host()}:{PORTAL_PORT}/')
     print(f'Admin:  http://{get_public_host()}:{PORTAL_PORT}/admin/login')
     for project in load_projects():

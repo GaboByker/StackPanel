@@ -11,6 +11,7 @@
 #   PORTAL_PORT         puerto del panel si no querés que se elija solo
 #   STACKPANEL_GUARD    0 = no instalar el agente de firewall (stackpanel-guard)
 #   STACKPANEL_SSHADM   0 = no instalar la gestión de usuarios/claves/sshd (stackpanel-sshadm)
+#   STACKPANEL_MOTD     0 = no poner el logo en el mensaje de bienvenida de SSH
 #   SSHADM_PROTECTED_USERS  usuarios que el panel nunca puede borrar (por defecto, quien instala)
 #   STACKPANEL_SRC      carpeta local con el código, en vez de descargarlo
 #                       (para probar cambios antes de publicarlos)
@@ -19,6 +20,32 @@ set -euo pipefail
 REPO="GaboByker/StackPanel"
 BRANCH="${STACKPANEL_BRANCH:-main}"
 INSTALL_DIR="${STACKPANEL_DIR:-$HOME/stackpanel}"
+
+# Logo de StackPanel en ASCII (en azul si la salida es una terminal).
+if [ -t 1 ]; then printf '\033[1;34m'; fi
+cat <<'BANNER'
+                ▄▄██▄▄
+            ▄▄██████████▄▄▄
+       ▄▄▄███████████████████▄▄
+   ▄▄████████████████████████████▄▄
+  ██████████████████████████████████
+  ██████████████████████████████████
+  ▀▀██████████████████████████████▀▀
+  ▄▄  ▀▀█████████▀▀▀▀█████████▀▀  ▄▄
+  ████▄▄ ▀▀█████      █████▀▀ ▄▄████
+  ███████▄▄ ████      ████ ▄▄███████
+  ▀▀█████████████    █████████████▀▀
+  ▄▄  ▀▀█████████    █████████▀▀  ▄▄
+  ████▄▄  ▀▀████      ████▀▀  ▄▄████
+  ████████▄▄████      ████▄▄████████
+  ▀▀██████████████████████████████▀▀
+      ▀████████████████████████▀
+         ▀▀████████████████▀▀
+             ▀██████████▀
+                ▀▀██▀▀
+BANNER
+if [ -t 1 ]; then printf '\033[0m'; fi
+echo
 
 echo "==> Instalando StackPanel en ${INSTALL_DIR}"
 
@@ -227,6 +254,15 @@ if [ "${STACKPANEL_GUARD:-1}" != "0" ]; then
         echo "==> No se pudo instalar stackpanel-guard. El panel funciona igual, pero los bloqueos" >&2
         echo "    y las reglas de puertos no se aplicarán en el servidor hasta que corras:" >&2
         echo "        cd ${INSTALL_DIR} && sudo ./guard/install-guard.sh ${GUARD_ARGS[*]}" >&2
+    fi
+fi
+
+# Logo de StackPanel en el mensaje de bienvenida al entrar por SSH (MOTD).
+# STACKPANEL_MOTD=0 para no instalarlo.
+if [ "${STACKPANEL_MOTD:-1}" != "0" ] && [ -d /etc/update-motd.d ]; then
+    if [ "$(id -u)" = "0" ]; then MOTD_SUDO=""; else MOTD_SUDO="sudo"; fi
+    if ! ${MOTD_SUDO} install -m 0755 "${INSTALL_DIR}/motd/05-stackpanel" /etc/update-motd.d/05-stackpanel; then
+        echo "==> No se pudo instalar el logo en el mensaje de SSH (sigue sin problema)." >&2
     fi
 fi
 

@@ -620,7 +620,14 @@ textarea.input-code--editor { min-height: 60vh; padding: var(--space-3-5); }
 	top: 0;
 	z-index: var(--z-topbar);
 }
-.landing-topbar-brand { font-weight: var(--fw-bold); font-size: var(--fs-md); letter-spacing: var(--tracking-snug); }
+.landing-topbar-brand {
+	display: flex; align-items: center; gap: var(--space-3);
+	font-weight: var(--fw-bold); font-size: var(--fs-md); letter-spacing: var(--tracking-snug);
+	color: var(--text); text-decoration: none;
+}
+.landing-topbar-brand span { padding-left: var(--space-3); border-left: 1px solid var(--border); }
+.landing-logo { display: block; height: 40px; width: auto; }
+@media (max-width: 560px) { .landing-topbar-brand span { display: none; } }
 .landing-topbar nav { display: flex; align-items: center; gap: var(--space-4); flex-wrap: wrap; }
 .landing-topbar nav a,
 .landing-topbar nav .admin-user,
@@ -770,6 +777,18 @@ textarea.input-code--editor { min-height: 60vh; padding: var(--space-3-5); }
 	width: 10px; height: 10px; border-radius: 3px; background: var(--accent); flex-shrink: 0;
 	box-shadow: 0 0 0 3px var(--accent-bg), 0 0 12px var(--accent);
 }
+/* Logo de marca (PNG transparente con texto azul marino): en tema oscuro
+   se le pone un fondo claro para que el texto siga siendo legible. */
+.admin-brand-logo { display: block; width: 100%; height: auto; }
+.auth-logo { display: block; width: 100%; max-width: 260px; height: auto; margin: 0 auto var(--space-4); }
+@media (prefers-color-scheme: dark) {
+	:root:not([data-theme="light"]) .admin-brand-logo,
+	:root:not([data-theme="light"]) .auth-logo,
+	:root:not([data-theme="light"]) .landing-logo { background: #f4f6fb; border-radius: var(--radius-sm); padding: 4px 8px; }
+}
+:root[data-theme="dark"] .admin-brand-logo,
+:root[data-theme="dark"] .auth-logo,
+:root[data-theme="dark"] .landing-logo { background: #f4f6fb; border-radius: var(--radius-sm); padding: 4px 8px; }
 .admin-nav { display: flex; flex-direction: column; padding: var(--space-2-5) var(--space-3); gap: var(--space-0-5); flex: 1; overflow-y: auto; }
 .admin-nav a {
 	display: flex;
@@ -873,6 +892,7 @@ textarea.input-code--editor { min-height: 60vh; padding: var(--space-3-5); }
 		padding: var(--space-3) var(--space-4);
 	}
 	.admin-brand { border-bottom: none; padding: 0; min-height: 0; }
+	.admin-brand-logo { width: auto; height: 40px; }
 	.admin-nav-toggle {
 		display: flex;
 		flex-direction: column;

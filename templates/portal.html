@@ -12,11 +12,16 @@
 	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 	<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap"/>
 	<link rel="stylesheet" href="/static/css/portal.css"/>
+	<link rel="icon" type="image/png" href="/static/img/logo-icon.png"/>
+	<link rel="apple-touch-icon" href="/static/img/logo-icon.png"/>
 	{% include '_theme_init.html' %}
 </head>
 <body class="landing-page">
 	<header class="landing-topbar">
-		<div class="landing-topbar-brand">Portal de proyectos</div>
+		<a href="/" class="landing-topbar-brand">
+			<img class="landing-logo" src="/static/img/logo.png" alt="StackPanel" width="640" height="178"/>
+			<span>Portal de proyectos</span>
+		</a>
 		<nav aria-label="Navegación principal">
 			<button type="button" class="theme-toggle-btn" id="theme-toggle-btn" aria-label="Cambiar tema"></button>
 			{% if current_admin %}

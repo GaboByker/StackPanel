@@ -10,10 +10,13 @@
 	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 	<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap"/>
 	<link rel="stylesheet" href="/static/css/portal.css"/>
+	<link rel="icon" type="image/png" href="/static/img/logo-icon.png"/>
+	<link rel="apple-touch-icon" href="/static/img/logo-icon.png"/>
 	{% include '_theme_init.html' %}
 </head>
 <body class="auth-shell">
 	<div class="auth-card">
+		<img class="auth-logo" src="/static/img/logo.png" alt="StackPanel — Contenedores y servidores" width="640" height="178"/>
 		<h1>Verificación en dos pasos</h1>
 		<p class="auth-subtitle">Ingresa el código de 6 dígitos de tu app de autenticación.</p>
 		{% if error %}<div class="alert alert-error">{{ error }}</div>{% endif %}
