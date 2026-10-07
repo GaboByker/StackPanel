@@ -52,7 +52,6 @@ run() {
     "$@" || { echo "    ⚠️  Falló: $*" >&2; FAILED=1; }
 }
 
-MOTD_FILE=/etc/update-motd.d/05-stackpanel
 SSHD_DROPIN=/etc/ssh/sshd_config.d/05-stackpanel.conf
 CONTAINERS="stackpanel stackpanel-proxy stackpanel-certbot stackpanel-sftp"
 
@@ -152,16 +151,18 @@ if command -v systemctl >/dev/null 2>&1; then
 fi
 
 # --- Logo del mensaje de bienvenida de SSH ---------------------------------------
-# Solo se borra si es el nuestro. El resto del mensaje (Ubuntu, el proveedor
+# Solo se borra si es el nuestro. El resto del mensaje (el del sistema, el proveedor
 # del VPS) no se toca y vuelve a verse como antes de instalar.
-if [ -f "${MOTD_FILE}" ]; then
-    if grep -q 'StackPanel' "${MOTD_FILE}" 2>/dev/null; then
-        echo "==> Quitando el logo del mensaje de bienvenida de SSH..."
-        run ${SUDO} rm -f "${MOTD_FILE}"
+# (/etc/update-motd.d/05-stackpanel es de versiones anteriores del instalador.)
+for logo in /etc/profile.d/stackpanel-logo.sh /etc/update-motd.d/05-stackpanel; do
+    [ -f "${logo}" ] || continue
+    if grep -q 'StackPanel' "${logo}" 2>/dev/null; then
+        echo "==> Quitando el logo del mensaje de bienvenida de SSH (${logo})..."
+        run ${SUDO} rm -f "${logo}"
     else
-        echo "==> ${MOTD_FILE} no es de StackPanel, lo dejo como está."
+        echo "==> ${logo} no es de StackPanel, lo dejo como está."
     fi
-fi
+done
 
 # --- Carpeta del panel ---------------------------------------------------------
 if [ "${PURGE}" = "1" ] && [ -d "${INSTALL_DIR}" ]; then

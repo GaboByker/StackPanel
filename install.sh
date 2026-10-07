@@ -257,12 +257,17 @@ if [ "${STACKPANEL_GUARD:-1}" != "0" ]; then
     fi
 fi
 
-# Logo de StackPanel en el mensaje de bienvenida al entrar por SSH (MOTD).
-# STACKPANEL_MOTD=0 para no instalarlo.
-if [ "${STACKPANEL_MOTD:-1}" != "0" ] && [ -d /etc/update-motd.d ]; then
+# Logo de StackPanel al entrar por SSH, justo antes del prompt (después del
+# mensaje de bienvenida del sistema y del proveedor, que no se tocan). STACKPANEL_MOTD=0 para
+# no instalarlo.
+if [ "${STACKPANEL_MOTD:-1}" != "0" ] && [ -d /etc/profile.d ]; then
     if [ "$(id -u)" = "0" ]; then MOTD_SUDO=""; else MOTD_SUDO="sudo"; fi
-    if ! ${MOTD_SUDO} install -m 0755 "${INSTALL_DIR}/motd/05-stackpanel" /etc/update-motd.d/05-stackpanel; then
+    if ! ${MOTD_SUDO} install -m 0644 "${INSTALL_DIR}/motd/stackpanel-logo.sh" /etc/profile.d/stackpanel-logo.sh; then
         echo "==> No se pudo instalar el logo en el mensaje de SSH (sigue sin problema)." >&2
+    fi
+    # Versiones anteriores lo ponían en update-motd.d (salía arriba de todo).
+    if grep -qs 'StackPanel' /etc/update-motd.d/05-stackpanel; then
+        ${MOTD_SUDO} rm -f /etc/update-motd.d/05-stackpanel || true
     fi
 fi
 

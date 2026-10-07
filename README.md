@@ -49,7 +49,7 @@ Para instalar en otra carpeta o rama:
 STACKPANEL_DIR=/otra/ruta STACKPANEL_BRANCH=main curl -fsSL https://raw.githubusercontent.com/GaboByker/StackPanel/main/install.sh | bash
 ```
 
-Si no querés el logo de StackPanel en el mensaje de bienvenida de SSH, instalá con `STACKPANEL_MOTD=0`.
+Al entrar por SSH se muestra el logo de StackPanel justo antes del prompt, después del mensaje de bienvenida del sistema y del proveedor (que no se modifican). Funciona en cualquier Linux con `/etc/profile.d` (Ubuntu, Debian, RHEL/Alma/Rocky, Alpine...); si no existe, simplemente no se instala. Para no instalarlo: `STACKPANEL_MOTD=0`.
 
 ### Desinstalar
 
