@@ -67,7 +67,6 @@ def init_db(root):
             '''
         )
         _migrate_projects_columns(conn)
-        _migrate_metrics_columns(conn)
         # Datos propios de esta instalación, si existen (site_presets.py).
         _seed_sites(conn)
         _seed_projects(conn)
@@ -102,6 +101,7 @@ def init_db(root):
         conn.execute(
             'CREATE INDEX IF NOT EXISTS idx_project_metrics_ts ON project_metrics_history (ts)'
         )
+        _migrate_metrics_columns(conn)
         conn.execute(
             '''
             CREATE TABLE IF NOT EXISTS project_databases (
@@ -170,6 +170,8 @@ def _migrate_projects_columns(conn):
 
 def _migrate_metrics_columns(conn):
     existing = {row[1] for row in conn.execute('PRAGMA table_info(metrics_history)')}
+    if not existing:
+        return
     for column, kind in (
         ('cpus', 'INTEGER'), ('mem_used_bytes', 'INTEGER'), ('mem_total_bytes', 'INTEGER'),
         ('disk_used_bytes', 'INTEGER'), ('disk_total_bytes', 'INTEGER'),

@@ -69,6 +69,35 @@ cd "${INSTALL_DIR}"
 echo "==> Creando carpetas de datos (html/, backups/, proxy/sites/, instance/)..."
 mkdir -p html backups proxy/sites instance
 
+# IP de esta máquina en la red local (LAN). Es la que sirve desde la misma
+# red: detrás de un router, la IP pública no anda desde adentro y el puerto
+# no está redirigido. Se ignoran las interfaces de Docker (docker0, br-*,
+# 172.17+), que no son accesibles desde otras máquinas.
+is_docker_ip() {
+    case "$1" in
+        172.1[7-9].*|172.2[0-9].*|172.3[01].*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+detect_local_ip() {
+    local ip dev
+    if command -v ip >/dev/null 2>&1; then
+        ip=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}' | head -n1)
+        dev=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="dev") print $(i+1)}' | head -n1)
+        case "${dev}" in docker*|br-*|veth*) ip="" ;; esac
+        if [ -n "${ip}" ] && ! is_docker_ip "${ip}"; then
+            echo "${ip}"; return
+        fi
+    fi
+    # Respaldo: la primera IPv4 de "hostname -I" que no sea de Docker.
+    for ip in $(hostname -I 2>/dev/null); do
+        case "${ip}" in *:*|127.*) continue ;; esac
+        is_docker_ip "${ip}" && continue
+        echo "${ip}"; return
+    done
+}
+LOCAL_IP=$(detect_local_ip || true)
+
 if [ ! -f .env ]; then
     echo "==> Generando .env..."
     cp .env.example .env
@@ -82,7 +111,7 @@ if [ ! -f .env ]; then
         PUBLIC_IP=$(curl -fsSL --max-time 3 -6 ifconfig.me 2>/dev/null || true)
     fi
     case "${PUBLIC_IP}" in
-        "") PUBLIC_IP="localhost" ;;
+        "") PUBLIC_IP="${LOCAL_IP:-localhost}" ;;
         *:*) PUBLIC_IP="[${PUBLIC_IP}]" ;;  # IPv6: necesita corchetes en una URL
     esac
 
@@ -110,6 +139,11 @@ else
             ;;
     esac
 fi
+
+# IP local: se guarda (o actualiza) en el .env por si el panel la necesita.
+grep -q '^LOCAL_HOST=' .env || echo 'LOCAL_HOST=' >> .env
+sed -i.bak "s#^LOCAL_HOST=.*#LOCAL_HOST=${LOCAL_IP}#" .env
+rm -f .env.bak
 
 # Puerto del panel: si el que hay en .env (o el default 5005) está ocupado,
 # busca el próximo libre y lo deja anotado. 80/443 (nginx del proxy) NO se
@@ -196,7 +230,61 @@ if [ "${STACKPANEL_GUARD:-1}" != "0" ]; then
     fi
 fi
 
+# Antes de decir que todo anda, comprobamos que el panel responda de verdad:
+# el contenedor puede estar "Restarting" en bucle aunque compose haya salido bien.
+echo "==> Esperando a que el panel responda en el puerto ${PORT}..."
+PANEL_OK=0
+for _ in $(seq 1 60); do
+    HTTP_CODE=$(curl -s -o /dev/null --max-time 2 -w '%{http_code}' "http://127.0.0.1:${PORT}/setup" 2>/dev/null || true)
+    case "${HTTP_CODE}" in
+        200|302) PANEL_OK=1; break ;;
+    esac
+    sleep 1
+done
+if [ "${PANEL_OK}" != "1" ]; then
+    {
+        echo
+        echo "❌ El panel no respondió en http://127.0.0.1:${PORT}/setup después de 60 segundos."
+        echo "   Estado del contenedor: $(docker inspect -f '{{.State.Status}}' stackpanel 2>/dev/null || echo 'desconocido')"
+        echo "   Últimas líneas del log (docker logs --tail 30 stackpanel):"
+        echo
+        docker logs --tail 30 stackpanel 2>&1 | sed 's/^/    /'
+        echo
+        echo "   Revisá el error de arriba y volvé a correr el instalador, o mirá los logs con:"
+        echo "       cd ${INSTALL_DIR} && docker compose logs -f portal"
+    } >&2
+    exit 1
+fi
+
 PUBLIC_HOST=$(grep '^PUBLIC_HOST=' .env | cut -d= -f2-)
+PUBLIC_PLAIN="${PUBLIC_HOST#[}"; PUBLIC_PLAIN="${PUBLIC_PLAIN%]}"
+[ "${PUBLIC_HOST}" = "localhost" ] && PUBLIC_HOST=""
+
+is_private_ip() {
+    case "$1" in
+        10.*|192.168.*|172.1[6-9].*|172.2[0-9].*|172.3[01].*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+if [ -n "${LOCAL_IP}" ] && [ -n "${PUBLIC_HOST}" ] && [ "${LOCAL_IP}" != "${PUBLIC_PLAIN}" ]; then
+    URLS="    Red local (desde esta red / esta PC):  http://${LOCAL_IP}:${PORT}/setup
+    Pública (desde internet):              http://${PUBLIC_HOST}:${PORT}/setup
+
+Si la instalaste en una PC local, usá la URL de red local. La pública solo anda
+si redirigiste el puerto ${PORT} en tu router (y tu proveedor no usa CGNAT)."
+    if is_private_ip "${LOCAL_IP}"; then
+        URLS="${URLS}
+
+⚠️  Parece una instalación en red local (casa/oficina detrás de un router):
+    la IP ${LOCAL_IP} es privada y distinta de la pública."
+    fi
+elif [ -n "${LOCAL_IP}" ] || [ -n "${PUBLIC_HOST}" ]; then
+    # VPS típico (la IP local es la pública) o solo se pudo detectar una.
+    URLS="    http://${PUBLIC_HOST:-${LOCAL_IP}}:${PORT}/setup"
+else
+    URLS="    http://localhost:${PORT}/setup"
+fi
 
 cat <<MSG
 
@@ -204,7 +292,7 @@ cat <<MSG
 
 Abrí en tu navegador:
 
-    http://${PUBLIC_HOST}:${PORT}/setup
+${URLS}
 
 La primera vez te va a pedir crear el usuario administrador.
 
