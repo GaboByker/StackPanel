@@ -91,10 +91,19 @@ def render_site_conf(domain, target_host, target_port, ssl_ready):
     # cada request. Si no, cuando el contenedor destino se recrea (ej. al
     # reiniciarlo a mano) le toca IP nueva y el sitio queda en 502 hasta el
     # próximo "nginx -s reload".
-    upstream_var = '$upstream_' + re.sub(r'[^a-z0-9]+', '_', domain.lower()).strip('_')
+    # Excepción: host.docker.internal vive solo en /etc/hosts, que el
+    # "resolver" de nginx no lee (daría "could not be resolved"); su IP no
+    # cambia, así que va directo y nginx la resuelve al cargar.
+    if target_host == 'host.docker.internal' or re.fullmatch(r'[0-9.]+', target_host):
+        upstream_lines = f'        proxy_pass http://{target_host}:{target_port};\n'
+    else:
+        upstream_var = '$upstream_' + re.sub(r'[^a-z0-9]+', '_', domain.lower()).strip('_')
+        upstream_lines = (
+            f'        set {upstream_var} {target_host}:{target_port};\n'
+            f'        proxy_pass http://{upstream_var};\n'
+        )
     proxy_headers = (
-        f'        set {upstream_var} {target_host}:{target_port};\n'
-        f'        proxy_pass http://{upstream_var};\n'
+        upstream_lines +
         f'        proxy_http_version 1.1;\n'
         f'        proxy_set_header Host $host;\n'
         f'        proxy_set_header X-Real-IP $remote_addr;\n'
