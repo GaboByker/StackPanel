@@ -333,7 +333,7 @@
 	</form>
 
 	<p class="detail-section-hint" style="margin-top:20px;">Elimina el proyecto por completo: detiene y borra sus contenedores, sus volúmenes de Docker (incluye bases de datos) y su carpeta en <code>html/</code>. No se puede deshacer.</p>
-	<form method="post" action="/admin/projects/{{ project.id }}/wipe" onsubmit="return confirm('ESTO BORRA CONTENEDORES, VOLÚMENES Y ARCHIVOS de \'{{ project.name }}\' de forma PERMANENTE.') && (prompt('Escribe el nombre del proyecto para confirmar: {{ project.name }}') === {{ project.name|tojson }});">
+	<form method="post" action="/admin/projects/{{ project.id }}/wipe" onsubmit="return confirm('ESTO BORRA CONTENEDORES, VOLÚMENES, IMÁGENES, REDES Y ARCHIVOS de \'{{ project.name }}\' de forma PERMANENTE.') && (prompt('Escribe el nombre del proyecto para confirmar: {{ project.name }}') === {{ project.name|tojson }});">
 		<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
 		<button type="submit" class="btn btn-danger btn-sm">Eliminar todo (contenedores + volúmenes + archivos)</button>
 	</form>

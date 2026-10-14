@@ -1,13 +1,7 @@
-"""Acceso directo desde el panel a los WordPress del servidor.
+"""Entrada directa a wp-admin desde el panel.
 
-El panel deja en wp-content/mu-plugins un plugin "must-use" que acepta un
-enlace firmado (HMAC-SHA256 con una clave propia de cada sitio), válido 60 s
-y de un solo uso; al validarlo inicia sesión como administrador y redirige a
-wp-admin. La clave vive en wp-content/mu-plugins/stackpanel-sso/key.php
-(un archivo PHP que solo devuelve la clave: servido por HTTP no muestra nada).
-
-También completa la instalación de un WordPress recién creado (el paso de
-"título + usuario + contraseña"), para que se pueda entrar desde el minuto uno.
+Un mu-plugin acepta un enlace firmado (HMAC-SHA256 con una clave por sitio), válido 60 s y de un
+solo uso. También completa la instalación de un WordPress nuevo.
 """
 import base64
 import hashlib
@@ -110,8 +104,7 @@ def _read_key(local_folder):
 
 
 def ensure(local_folder, rotate=False):
-    """Instala/actualiza el plugin y devuelve la clave del sitio.
-    rotate=True genera una clave nueva (p. ej. tras clonar un sitio)."""
+    """Instala o actualiza el plugin y devuelve la clave. rotate=True genera una nueva (p. ej. al clonar)."""
     mu_dir = os.path.join(wp_content(local_folder), 'mu-plugins')
     os.makedirs(os.path.join(mu_dir, KEY_DIR), exist_ok=True)
 
@@ -165,8 +158,7 @@ _opener = urllib.request.build_opener(_NoRedirect)
 
 
 def _request(base, path, public_url, data=None, timeout=20):
-    """Pide `path` al contenedor (base = http://contenedor) pero con el Host y
-    el esquema del sitio público, para que WordPress guarde esa URL."""
+    """Pide `path` al contenedor con el Host y esquema públicos, para que WordPress guarde esa URL."""
     parsed = urllib.parse.urlparse(public_url)
     headers = {'Host': parsed.netloc, 'User-Agent': 'StackPanel'}
     if parsed.scheme == 'https':
@@ -191,9 +183,7 @@ def _installed(base, public_url):
 
 
 def complete_install(bases, public_url, title, admin_email, user, language='es_ES', wait=90):
-    """Hace el paso de instalación de WordPress. `bases` son direcciones donde
-    probar a alcanzar el contenedor (por nombre en su red, o por el puerto
-    publicado en el host). Devuelve (password, error)."""
+    """Completa la instalación probando cada dirección de `bases`. Devuelve (password, error)."""
     deadline = time.time() + wait
     base = None
     while time.time() < deadline and not base:

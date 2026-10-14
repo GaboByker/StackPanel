@@ -1,5 +1,4 @@
-"""Backups de proyecto: comprime la carpeta (con exclusiones razonables) y
-cualquier volumen Docker asociado en un solo .tar.gz, y permite restaurarlo."""
+"""Backups de proyecto: carpeta y volúmenes en un solo .tar.gz, y su restauración."""
 import io
 import json
 import os

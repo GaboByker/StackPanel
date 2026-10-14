@@ -39,11 +39,49 @@
 
 {{ unlock_card('/admin/ssh/config') }}
 
-<p class="admin-hint">
-	Estos ajustes se guardan en <code>/etc/ssh/sshd_config.d/05-stackpanel.conf</code>, que tiene prioridad sobre el resto de la configuración. Antes de aplicarlos se validan con <code>sshd -t</code>, y nunca se aceptan si dejarían el servidor sin ningún usuario con sudo que pueda entrar.
-	Recargar sshd no corta las conexiones abiertas.
-	{% if st.sshd_extra.port %}Puerto actual: <code>{{ st.sshd_extra.port }}</code> (se cambia a mano, junto con el <a href="/admin/firewall">firewall</a>).{% endif %}
-</p>
+<p class="admin-hint">Se validan con <code>sshd -t</code> y nunca dejan el servidor sin un usuario con sudo.</p>
+{% set ports = (st.sshd_extra.port or '').split() %}
+{% set ssh_host = request.host.split(':')[0] %}
+{% set sudo_users = st.users|selectattr('sudo')|map(attribute='name')|list %}
+{% set ssh_user = (st.protected + sudo_users + ['usuario'])|first %}
+{% set locked = not unlock_left or pending or st.disabled %}
+<article class="admin-service-card" style="margin-bottom:20px;">
+	<h3 style="margin-top:0;">Puertos de SSH</h3>
+	<p class="admin-hint" style="margin:0 0 12px;">Mantén al menos dos puertos activos: tu proveedor puede bloquear alguno (pasa con el 22).</p>
+	<form method="post" action="/admin/ssh/config/ports">
+		<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+		<div class="admin-table-wrap" style="margin-bottom:12px;"><table class="admin-table">
+			<thead><tr><th>Activo</th><th>Puerto</th><th>Estado</th><th>Comando para conectarte</th></tr></thead>
+			<tbody>
+			{% for p in ports %}
+				<tr>
+					<td><input type="checkbox" name="port" value="{{ p }}" checked aria-label="Puerto {{ p }} activo" {{ 'disabled' if locked else '' }}/></td>
+					<td><code>{{ p }}</code></td>
+					<td><span class="status-pill {{ 'running' if p in st.listening else 'stopped' }}">{{ 'Escuchando' if p in st.listening else 'No escucha' }}</span></td>
+					<td><code class="ssh-cmd">ssh {{ '' if p == '22' else '-p ' ~ p ~ ' ' }}{{ ssh_user }}@{{ ssh_host }}</code>
+						<button type="button" class="btn btn-secondary btn-sm ssh-copy" aria-label="Copiar el comando del puerto {{ p }}">Copiar</button></td>
+				</tr>
+			{% endfor %}
+			</tbody>
+		</table></div>
+		<p style="margin:0 0 12px;"><label>Agregar puerto <input type="text" name="new_port" placeholder="p. ej. 2222" inputmode="numeric" pattern="[0-9 ,]*" size="8" {{ 'disabled' if locked else '' }}/></label>
+			<small class="admin-hint">Desmarca un puerto para desactivarlo. Máx. 4.</small></p>
+		<div class="ssh-actions">
+			<button type="submit" class="btn btn-primary" {{ 'disabled' if locked else '' }}>Aplicar puertos a prueba ({{ st.confirm_seconds // 60 }} min)</button>
+			{% if pending %}<span class="admin-hint">Primero confirma o descarta el cambio pendiente.</span>
+			{% elif not unlock_left %}<span class="admin-hint">Desbloquea arriba para cambiar los puertos.</span>{% endif %}
+		</div>
+	</form>
+	<h3 style="margin-top:20px;">Servicios de SSH</h3>
+	<p style="margin:0 0 10px;">
+		{% for u, state in (st.units or {}).items() %}<code>{{ u }}</code> <span class="status-pill {{ 'running' if state == 'active' else 'stopped' }}">{{ {'active': 'Activo', 'inactive': 'Detenido', 'failed': 'Con error'}.get(state, state) }}</span> {% endfor %}
+	</p>
+	<form method="post" action="/admin/ssh/config/restart" class="ssh-actions">
+		<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+		<button type="submit" class="btn btn-secondary" data-confirm="¿Reiniciar los servicios de SSH? Se vuelven a abrir todos los puertos ({{ ports|join(', ') }}) y las sesiones abiertas no se cortan." {{ 'disabled' if locked else '' }}>Reiniciar servicios de SSH</button>
+		<span class="admin-hint">Úsalo si un puerto aparece como "No escucha" o SSH dejó de responder.</span>
+	</form>
+</article>
 {% if st.sshd_error %}<p class="admin-hint" style="color:var(--danger-text);">No se pudo leer la configuración efectiva: {{ st.sshd_error }}</p>{% endif %}
 
 {% set cur = st.sshd %}
@@ -108,6 +146,16 @@
 {% endif %}
 
 <script>
+document.querySelectorAll('.ssh-copy').forEach(function (b) {
+	b.addEventListener('click', function () {
+		// El panel puede ir por HTTP, donde no existe navigator.clipboard.
+		var r = document.createRange(); r.selectNodeContents(b.previousElementSibling);
+		var sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
+		var ok = false; try { ok = document.execCommand('copy'); } catch (e) {}
+		b.textContent = ok ? 'Copiado' : 'Seleccionado: Ctrl+C';
+		setTimeout(function () { b.textContent = 'Copiar'; }, 1800);
+	});
+});
 (function () {
 	var box = document.getElementById('sshd-pending');
 	if (!box) return;

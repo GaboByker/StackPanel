@@ -1,6 +1,4 @@
-"""Envío de notificaciones a Discord/Slack/Email. Las credenciales las
-configura el propio administrador en /admin/notifications; nada viene
-precargado. Cada canal y cada tipo de evento tiene su propia casilla."""
+"""Notificaciones a Discord, Slack y correo, configuradas en /admin/notifications."""
 import json
 import smtplib
 import urllib.request
@@ -79,8 +77,9 @@ def send_email(cfg, title, message):
 
 
 def notify(root, event_key, title, message):
-    """event_key: 'project_down' | 'disk_full' | 'ssl_expiring' | 'security_ban' | 'ssh_new_ip' | 'test'.
-    'test' ignora las casillas de evento (se usa para el botón de prueba)."""
+    """event_key: 'project_down' | 'disk_full' | 'ssl_expiring' | 'security_ban' | 'ssh_new_ip' | 'test' (ignora las casillas)."""
+    # Todo evento queda en el historial del panel (campana), aunque no haya canales activados.
+    panel_db.log_notification(root, event_key, title, message)
     cfg = get_config(root)
     if event_key != 'test' and cfg.get(f'notify_{event_key}') != '1':
         return []

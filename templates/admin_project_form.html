@@ -123,7 +123,7 @@
 			portsHint.textContent = 'Puertos detectados en Docker: ' + dockerPorts.map(function (p) {
 				return p.port + ' (' + p.container + (p.http_ok ? ', responde HTTP' : ', no responde HTTP') + ')';
 			}).join(', ');
-			// Si el puerto está vacío, sugerimos el primero que sí responde HTTP.
+			// Con el puerto vacío se sugiere el primero que responde HTTP.
 			if (!portInput.value) {
 				const httpPort = dockerPorts.find(function (p) { return p.http_ok && !p.registered; });
 				if (httpPort) { portInput.value = httpPort.port; }

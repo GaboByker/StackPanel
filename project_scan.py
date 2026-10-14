@@ -1,6 +1,4 @@
-"""Detecta carpetas dentro de html/ que todavía no están registradas en el
-panel (por ejemplo, un proyecto creado a mano por SSH), y trata de adivinar
-sus contenedores/puerto cruzando con lo que ya está corriendo en Docker."""
+"""Detecta carpetas de html/ sin registrar y adivina sus contenedores y puerto."""
 import os
 import re
 
@@ -13,8 +11,7 @@ def _compose_project_name(dir_name):
 
 
 def match_containers(dir_name, containers):
-    """Contenedores que pertenecen a la carpeta html/<dir_name>: por el label
-    de proyecto de Compose o porque su nombre empieza con el de la carpeta."""
+    """Contenedores de html/<dir_name>, por label de Compose o por prefijo del nombre."""
     compose_project = _compose_project_name(dir_name)
     return [
         c for c in containers
@@ -44,9 +41,7 @@ def scan_candidates(stack_root, registered_folders):
         container_names = sorted({c['name'] for c in matched})
         ports = sorted({p for c in matched for p in c['host_ports']})
         running = any(c['state'] == 'running' for c in matched)
-        # Si el contenedor publica varios puertos (p.ej. un dev server y el
-        # sitio real), probamos cuál responde HTTP en vez de asumir el más
-        # bajo; si ninguno responde (o no está corriendo) usamos el primero.
+        # Con varios puertos se elige el que responde HTTP; si ninguno responde, el primero.
         port_guess = None
         if ports:
             port_guess = docker_control.pick_http_port(ports) if running else None

@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
-# Instala o actualiza stackpanel-guard en el host (requiere root).
+# Instala o actualiza stackpanel-guard y stackpanel-sshadm (requiere root).
 #   sudo ./guard/install-guard.sh [ruta/a/portal.db] [IP-o-rango-de-confianza ...]
-# Las IPs extra se agregan a /etc/stackpanel-guard/allow.conf (lista blanca
-# que el panel no puede modificar). Se respeta lo que ya exista.
+# Las IPs se agregan a /etc/stackpanel-guard/allow.conf, que el panel no puede modificar.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -10,7 +9,7 @@ DB_PATH="${1:-$(cd "$HERE/.." && pwd)/instance/portal.db}"
 shift || true
 
 if [[ $EUID -ne 0 ]]; then
-	echo "Ejecutalo con sudo." >&2
+	echo "Ejecútalo con sudo." >&2
 	exit 1
 fi
 command -v nft >/dev/null || { apt-get update && apt-get install -y nftables; }
@@ -48,16 +47,13 @@ done
 chmod 0600 /etc/stackpanel-guard/guard.conf /etc/stackpanel-guard/allow.conf
 
 install -m 0644 "$HERE/stackpanel-guard.service" /etc/systemd/system/stackpanel-guard.service
-# El detector escribe en la base del panel: solo esa carpeta queda con escritura.
+# El detector escribe en la base del panel: solo esa carpeta tiene escritura.
 DB_DIR="$(dirname "$(grep -E '^DB_PATH=' /etc/stackpanel-guard/guard.conf | cut -d= -f2-)")"
 install -d -m 0755 /etc/systemd/system/stackpanel-guard.service.d
 printf '[Service]\nReadWritePaths=%s\n' "$DB_DIR" > /etc/systemd/system/stackpanel-guard.service.d/db-path.conf
 
-# --- stackpanel-sshadm: usuarios, claves y sshd desde el panel ---
-# Se omite con STACKPANEL_SSHADM=0 (el panel muestra entonces esa sección
-# como no disponible). Usuarios protegidos (nunca se borran ni pierden sudo):
-# por defecto quien ejecuta este instalador con sudo. Para indicar otros:
-#   sudo SSHADM_PROTECTED_USERS="ana luis" ./guard/install-guard.sh
+# --- stackpanel-sshadm (se omite con STACKPANEL_SSHADM=0) ---
+# Usuarios protegidos: por defecto quien ejecuta con sudo; otros con SSHADM_PROTECTED_USERS="ana luis".
 SSHADM_UNITS=""
 if [[ "${STACKPANEL_SSHADM:-1}" != "0" ]]; then
 SSHADM_UNITS="stackpanel-sshadm"
@@ -80,6 +76,10 @@ elif [[ -n "${SSHADM_PROTECTED_USERS:-}" ]]; then
 fi
 chmod 0600 /etc/stackpanel-sshadm/sshadm.conf
 install -m 0644 "$HERE/stackpanel-sshadm.service" /etc/systemd/system/stackpanel-sshadm.service
+# Con ssh.socket, detener ssh.service borra /run/sshd y el `sshd -t` del agente falla.
+install -d /etc/systemd/system/ssh.service.d
+printf '[Service]\nRuntimeDirectoryPreserve=yes\n' > /etc/systemd/system/ssh.service.d/stackpanel-rundir.conf
+install -d -m 0755 /run/sshd
 
 else
 	systemctl disable --now stackpanel-sshadm 2>/dev/null || true

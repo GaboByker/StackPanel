@@ -1,17 +1,9 @@
-"""Crea un proyecto nuevo a partir de uno o más repositorios Git. Cada
-repositorio se clona a su propia subcarpeta (útil cuando un proyecto es
-backend + frontend en repos separados) y se levanta según lo que traiga:
+"""Crea un proyecto a partir de uno o más repositorios Git, cada uno en su subcarpeta.
 
-- Si tiene su propio Dockerfile: se construye una imagen a partir de él.
-- Si no, se detecta Python (requirements.txt/pyproject.toml) o Node
-  (package.json) y se corre con una imagen base genérica, montando el
-  código tal como hace "Instalar app" con sus plantillas.
-- Si sólo trae HTML/CSS/JS (index.html, o en public/dist/build), se sirve
-  con nginx.
-
-Todos los contenedores del proyecto quedan en una red privada propia con
-alias = su "rol" (ej. "backend", "frontend"), así uno puede llamar al otro
-por ese nombre sin que la URL pública tenga nada que ver."""
+Con Dockerfile se construye una imagen; si no, se detecta Python o Node y se usa una imagen
+base, o se sirve con nginx si solo hay HTML. Los contenedores comparten una red privada con
+alias = su rol (p. ej. "backend"), para llamarse entre sí por ese nombre.
+"""
 import io
 import json
 import os
@@ -25,17 +17,13 @@ import docker_ops
 _ENTRY_CANDIDATES_PY = ['app.py', 'main.py', 'wsgi.py', 'server.py']
 _STATIC_SUBDIRS = ('', 'public', 'dist', 'build')
 
-# Esquemas de git que pueden ejecutar comandos arbitrarios en el host
-# (ext:: lanza un proceso; file::/local permiten leer repos del propio
-# servidor). Solo se admiten repositorios remotos por http(s), ssh o git.
+# ext:: ejecuta procesos y file:: lee repos del servidor: solo se admiten http(s), ssh y git.
 _ALLOWED_URL_RE = re.compile(r'^(https?|git|ssh)://', re.IGNORECASE)
 _SCP_LIKE_RE = re.compile(r'^[A-Za-z0-9._-]+@[A-Za-z0-9._-]+:')
 
 
 def _validate_clone_ref(url, branch):
-    """Rechaza URLs/ramas peligrosas antes de pasarlas a git: una url o rama
-    que empiece por '-' git la interpretaría como una opción (inyección de
-    argumentos), y el esquema ext:: permite ejecutar comandos en el host."""
+    """Rechaza URLs y ramas que git tomaría como opciones ('-...') o esquemas peligrosos."""
     url = (url or '').strip()
     if not url or url.startswith('-'):
         return 'URL de repositorio no válida.'
@@ -56,8 +44,7 @@ def clone_repo(url, branch, dest):
     cmd = ['git', 'clone', '--depth', '1']
     if branch:
         cmd += ['--branch', branch]
-    # El '--' cierra la lista de opciones: aunque url o dest llegaran a
-    # empezar por '-', git los trata como rutas y no como banderas.
+    # '--' evita que url o dest se interpreten como opciones.
     cmd += ['--', url, dest]
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
@@ -233,7 +220,7 @@ def create_from_repos(local_folder, host_folder, key, repos, public_index, publi
                 _cleanup(containers, network, local_folder)
                 return None, None, (
                     f'No pude adivinar cómo arrancar "{role}" ({kind}). '
-                    'Indicá un comando de inicio manualmente.'
+                    'Indica un comando de inicio manualmente.'
                 ), warnings
             ok, err = docker_ops.ensure_image(image)
             if not ok:

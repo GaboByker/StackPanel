@@ -1,23 +1,8 @@
-"""Motor de detección de stackpanel-guard (reemplazo de fail2ban).
+"""Detección de stackpanel-guard: lee los logs de cada jail y bloquea las IPs que superan su límite.
 
-Lee en vivo los logs de cada servicio ("jail"), reconoce intentos de acceso
-fallidos y, cuando una IP supera el límite de su jail dentro de la ventana,
-registra el bloqueo en la base del panel. El propio agente lo lleva luego al
-kernel, igual que un bloqueo hecho a mano.
-
-Jails:
-  sshd   SSH del servidor          journald (SYSLOG_IDENTIFIER sshd/sshd-session)
-  sftp   SFTP de los proyectos      logs del contenedor stackpanel-sftp
-  nginx  Webs a través del proxy    access log del contenedor del proxy
-
-Cada jail tiene tres modos, configurables desde el panel:
-  off      no lee ese log
-  observe  registra los intentos y avisa de quién se habría bloqueado
-  ban      además bloquea
-
-La configuración vive en la base (settings.sec_jails, JSON); este archivo
-solo trae los valores por defecto. Nada de lo que llega en un log se
-ejecuta: cada IP pasa por ipaddress antes de usarse.
+Jails: sshd (journald), sftp (contenedor stackpanel-sftp) y nginx (access log del proxy).
+Modos: off, observe (solo registra y avisa) y ban. La configuración vive en settings.sec_jails;
+aquí solo están los valores por defecto. Cada IP de un log pasa por ipaddress antes de usarse.
 """
 import collections
 import ipaddress
@@ -55,9 +40,7 @@ _PORT = r'port (?P<port>\d+)'
 SSH_FAIL = [
     re.compile(rf'^Failed (?P<method>password|publickey|keyboard-interactive/pam) for (?:invalid user )?(?P<user>\S*) from {_IP} {_PORT}'),
 ]
-# Fallo "blando": sondeos sin credencial o el cierre de una conexión ya
-# fallida. Cuenta una sola vez por conexión (IP+puerto de origen), para que
-# una misma conexión no sume 3 veces ("Invalid user" + "Failed" + "closed").
+# Fallo "blando" (sondeo o cierre de una conexión fallida): cuenta una vez por conexión.
 SSH_SOFT = [
     re.compile(rf'^Invalid user (?P<user>\S*) from {_IP} {_PORT}'),
     re.compile(rf'^Failed none for (?:invalid user )?(?P<user>\S*) from {_IP} {_PORT}'),
@@ -157,9 +140,7 @@ def load_jails(conn):
 # --- lectores de logs ---------------------------------------------------------
 
 class Reader(threading.Thread):
-    """Sigue un log con un proceso hijo (journalctl -f / docker logs -f) y
-    lo relanza si termina (p. ej. el contenedor SFTP se recrea al cambiar
-    un acceso). Cada línea va a detector.handle()."""
+    """Sigue un log con un proceso hijo y lo relanza si termina. Cada línea va a detector.handle()."""
 
     def __init__(self, detector, jail):
         super().__init__(daemon=True, name=f'reader-{jail}')
@@ -335,9 +316,7 @@ class Detector:
             addr = ipaddress.ip_address(ip)
         except ValueError:
             return
-        # Los accesos correctos se guardan siempre (también desde la LAN o
-        # una VPN): son el historial de quién entró. Los fallos de redes no
-        # públicas no se cuentan, porque nunca se bloquean.
+        # Los accesos correctos se guardan siempre (son el historial); los fallos de redes no públicas no cuentan.
         if not addr.is_global and result != 'ok':
             return
         ip = str(addr)
@@ -378,13 +357,11 @@ class Detector:
                 return
             self.stats[jail]['bans'] += 1
             self.pending_bans.append((ip, jail, count, conf, False))
-            # Hasta que el bloqueo llegue al kernel (segundos), que la misma
-            # IP no genere otro bloqueo duplicado.
+            # Evita un bloqueo duplicado mientras el primero llega al kernel.
             self.guard.mark_banned(ip)
 
     def flush(self, db_path):
-        """Escribe en la base los eventos y bloqueos acumulados. Devuelve
-        True si hubo bloqueos nuevos (para aplicarlos al kernel ya)."""
+        """Guarda los eventos y bloqueos pendientes. True si hubo bloqueos nuevos."""
         with self.lock:
             events, self.pending_events = self.pending_events, []
             bans, self.pending_bans = self.pending_bans, []

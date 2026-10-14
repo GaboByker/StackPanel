@@ -1,6 +1,4 @@
-"""Cliente de stackpanel-sshadm (usuarios, claves y sshd del host) por
-socket Unix. El panel no toca /etc ni /home: le pide cada cambio al agente,
-que valida todo por su cuenta (ver guard/stackpanel_sshadm.py)."""
+"""Cliente por socket Unix de stackpanel-sshadm, que valida cada cambio por su cuenta."""
 import json
 import os
 import socket

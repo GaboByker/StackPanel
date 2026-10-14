@@ -1,17 +1,8 @@
-"""Exposición de puertos del servidor, gestionada desde /admin/firewall.
+"""Exposición de puertos del servidor (/admin/firewall).
 
-Cada puerto puede ser:
-  public      abierto a todo internet (no hay regla: es lo normal)
-  restricted  solo entran las IPs/rangos indicados
-  closed      solo desde la red interna (Docker, el proxy, el propio servidor)
-
-Las reglas se guardan en settings (fw_ports = confirmadas). Todo cambio se
-aplica primero "a prueba" (fw_pending, con un plazo): si el admin no lo
-confirma a tiempo, el agente del host vuelve solo a las reglas confirmadas.
-Así un error que corte el acceso al panel se deshace sin intervención.
-
-La lista blanca de Seguridad y la de emergencia del servidor siempre entran
-a cualquier puerto, y las conexiones ya abiertas no se cortan al cambiar.
+Políticas: public (sin regla), restricted (solo las IPs indicadas) y closed (solo red interna).
+Todo cambio se aplica a prueba (fw_pending); si no se confirma a tiempo, el agente vuelve solo
+a las reglas confirmadas (fw_ports). Las listas blancas siempre entran a cualquier puerto.
 """
 import json
 from datetime import datetime, timedelta, timezone
@@ -67,8 +58,7 @@ def get_pending(root):
 
 
 def expire_if_needed(root):
-    """Limpia un cambio a prueba vencido (el agente ya lo revirtió en el
-    kernel). Devuelve True si había uno, para avisar en pantalla."""
+    """Limpia un cambio a prueba vencido. True si había uno."""
     pending = _load(root, 'fw_pending', None)
     if not isinstance(pending, dict):
         return False
@@ -88,8 +78,7 @@ def effective(root):
 
 
 def parse_form(form):
-    """Filas port_N/proto_N/policy_N/allow_N/note_N -> lista de reglas no
-    públicas. Devuelve (reglas, error)."""
+    """Filas port_N/proto_N/policy_N/allow_N/note_N -> (reglas no públicas, error)."""
     rules, seen = [], set()
     indexes = sorted({k.split('_', 1)[1] for k in form if k.startswith('port_')})
     for idx in indexes:
@@ -128,8 +117,7 @@ def parse_form(form):
 
 
 def lockout_error(root, rules, admin_ip, panel_port, static_allow):
-    """Rechaza cambios que, de entrada, dejarían fuera al admin del SSH o del
-    panel. (El plazo de confirmación cubre lo que esto no pueda prever.)"""
+    """Rechaza cambios que dejarían fuera al admin del SSH o del panel."""
     trusted = [r['cidr'] for r in security.list_allowlist(root)] + list(static_allow or [])
     if security._in_any(admin_ip, trusted):
         return None
@@ -182,9 +170,7 @@ def describe(rules):
 
 
 def port_table(root, published, listening):
-    """Filas para la pantalla: puertos publicados por Docker, puertos del
-    host y cualquier puerto que ya tenga regla, con su regla vigente.
-    published: [{port, proto, container}]; listening: [{port, proto}]."""
+    """Filas para la pantalla: puertos de Docker, del host y los que ya tienen regla."""
     projects = panel_db.list_projects_raw(root)
     by_port = {p['port']: p['name'] for p in projects if p.get('port')}
     by_container = {}

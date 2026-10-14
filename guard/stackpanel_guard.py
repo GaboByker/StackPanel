@@ -1,34 +1,14 @@
 #!/usr/bin/env python3
-"""stackpanel-guard: agente del host que lleva los bloqueos del panel al
-firewall del kernel (nftables).
+"""stackpanel-guard: lleva los bloqueos del panel al firewall del kernel (nftables).
 
-Separación de privilegios:
-  - El panel (expuesto a internet, dentro de Docker) NO tiene permisos de
-    red. Solo guarda en su base de datos qué IPs bloquear y cuáles permitir.
-  - Este agente (root, en el host, sin red) lee esa base en modo solo
-    lectura, valida cada entrada y aplica el resultado en su propia tabla
-    `inet stackpanel`. Nunca ejecuta texto que venga del panel: solo IPs que
-    pasan por ipaddress.ip_network.
-  - El panel le habla por un socket Unix: "sync" y "status" para el
-    firewall, y "ssh_sessions" / "ssh_terminate" para ver y cerrar sesiones
-    SSH del host (ver sessions.py; solo por Id validado).
+El panel no tiene permisos de red: solo guarda en su base qué IPs bloquear. Este agente
+(root, en el host) lee esa base en solo lectura, valida cada IP con ipaddress y aplica el
+resultado en su tabla `inet stackpanel`. La cadena va en prerouting con prioridad -300,
+antes del DNAT de Docker, así cubre también los puertos publicados por contenedores.
 
-Diseño de la tabla:
-  - Cadena en prerouting con prioridad -300: corre antes del conntrack y del
-    DNAT de Docker, así que cubre los puertos del host Y los publicados por
-    contenedores (que UFW no ve), en IPv4 e IPv6.
-  - Sets con rangos y caducidad: el kernel quita solo cada bloqueo al
-    vencer, aunque el agente esté parado.
-  - Si el agente se cae, las reglas siguen en el kernel (falla seguro).
-
-Protección contra dejarse fuera:
-  - /etc/stackpanel-guard/allow.conf: lista blanca que solo root puede
-    editar. El panel no puede tocarla. Siempre se acepta antes de bloquear.
-  - Nunca se bloquean redes no públicas (loopback, privadas, Docker...), ni
-    las IPs del propio servidor, ni rangos más amplios que MIN_PREFIX_V4/V6.
-  - Interruptor de emergencia: `touch /etc/stackpanel-guard/disabled`
-    retira la tabla en el siguiente ciclo y la deja retirada (sobrevive a
-    reinicios) hasta borrar ese archivo.
+Nunca se bloquean la lista blanca de root (/etc/stackpanel-guard/allow.conf), las redes no
+públicas, las IPs del propio servidor ni rangos más amplios que MIN_PREFIX_V4/V6.
+Emergencia: `touch /etc/stackpanel-guard/disabled` retira la tabla hasta borrar el archivo.
 """
 import argparse
 import hashlib
@@ -57,15 +37,11 @@ ALLOW_FILE = os.path.join(CONF_DIR, 'allow.conf')
 DISABLED_FLAG = os.path.join(CONF_DIR, 'disabled')
 SOCKET_PATH = '/run/stackpanel-guard/guard.sock'
 NFT = '/usr/sbin/nft'
-# El kernel guarda la caducidad en ms en 32 bits (~49 días). Los bloqueos
-# más largos se cargan con este tope y se renuevan con REFRESH_SECONDS.
+# El kernel guarda la caducidad en ms en 32 bits (~49 días); los bloqueos más largos se renuevan.
 MAX_ELEMENT_TIMEOUT = 30 * 86400
-# Reaplicación completa periódica aunque no haya cambios: renueva los topes
-# de arriba y repara la tabla si alguien la tocó a mano.
+# Reaplicación periódica: renueva esos topes y repara la tabla si se tocó a mano.
 REFRESH_SECONDS = 3600
-# Exposición de puertos: tráfico de redes internas (Docker, el propio
-# servidor, la red privada del proveedor) nunca se filtra por puerto, para
-# que el proxy y los contenedores sigan llegando a un puerto "cerrado".
+# El tráfico de redes internas nunca se filtra por puerto, para que el proxy y los contenedores sigan llegando.
 INTERNAL4 = ['10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', '100.64.0.0/10', '169.254.0.0/16']
 INTERNAL6 = ['fc00::/7', 'fe80::/10']
 MAX_PORT_RULES = 200
@@ -162,10 +138,8 @@ def read_db(db_path):
 
 
 def effective_port_rules(fw, static_allow):
-    """Reglas de exposición vigentes. Si hay un cambio a prueba (fw_pending)
-    y no venció su plazo, se aplica ese; al vencer sin confirmar se vuelve
-    solo a lo confirmado (fw_ports). La reversión la hace el agente, no el
-    panel: funciona aunque el cambio te haya dejado sin acceso al panel.
+    """Reglas de exposición vigentes. Un cambio a prueba (fw_pending) vuelve solo a fw_ports al vencer;
+    lo revierte el agente para que funcione aunque el cambio deje sin acceso al panel.
     -> (reglas, 'pending'|'committed', plazo|None, omitidas)"""
     now = datetime.now(timezone.utc)
     version, deadline = 'committed', None
@@ -236,9 +210,7 @@ def listening_ports():
 
 
 def _merge_nested(entries):
-    """Los sets con rangos no aceptan elementos solapados. Dos CIDR o son
-    disjuntos o uno contiene al otro: se queda el mayor con la caducidad más
-    lejana (None = permanente gana)."""
+    """Los sets con rangos no aceptan solapes: se queda el CIDR mayor con la caducidad más lejana."""
     kept = []
     for net, expires in sorted(entries, key=lambda e: (e[0].version, e[0].prefixlen)):
         parent = next((k for k in kept if k[0].version == net.version and net.subnet_of(k[0])), None)
@@ -330,8 +302,7 @@ def existing_port_sets():
 
 
 def render(desired, stale_sets=()):
-    """Una sola transacción: crea lo que falte (add es idempotente), rehace
-    las reglas y reemplaza el contenido de los sets. O se aplica todo o nada."""
+    """Una sola transacción: crea lo que falte, rehace las reglas y reemplaza los sets."""
     now = datetime.now(timezone.utc)
     t = f'inet {TABLE}'
     lines = [
@@ -368,10 +339,7 @@ def render(desired, stale_sets=()):
         if elems:
             lines.append(f'add element {t} {name} {{ ' + ', '.join(elems) + ' }')
 
-    # Exposición por puerto. Va en otra cadena con prioridad -150: después
-    # del conntrack (-200), para dejar pasar conexiones ya establecidas y las
-    # respuestas a conexiones salientes, y antes del DNAT de Docker (-100),
-    # así que el puerto que se ve es el publicado, no el del contenedor.
+    # Prioridad -150: después del conntrack (deja pasar lo ya establecido) y antes del DNAT de Docker (se ve el puerto publicado).
     lines += [
         f'add set {t} internal4 {{ type ipv4_addr; flags interval; }}',
         f'add set {t} internal6 {{ type ipv6_addr; flags interval; }}',
@@ -458,8 +426,7 @@ class Guard:
         self.last_hash = None
         self.last_apply = 0.0
         self.next_deadline = None
-        # Listas que consulta el detector desde sus hilos; se reemplazan
-        # enteras (nunca se mutan), así que leerlas no necesita el lock.
+        # Se reemplazan enteras y nunca se mutan, así que leerlas desde los hilos no necesita el lock.
         self.allow_nets = []
         self.ban_nets = []
         self.recent_bans = set()
@@ -665,9 +632,7 @@ def main():
     elif args.command == 'show':
         os.execv(NFT, [NFT, 'list', 'table', 'inet', TABLE])
     elif args.command == 'flush':
-        # Retira la tabla ahora. Si el servicio sigue activo la volverá a
-        # crear en el siguiente ciclo: para dejarla retirada usa el archivo
-        # /etc/stackpanel-guard/disabled.
+        # Si el servicio sigue activo la vuelve a crear; para dejarla retirada usa /etc/stackpanel-guard/disabled.
         remove_table()
         print('Tabla inet stackpanel retirada.')
 

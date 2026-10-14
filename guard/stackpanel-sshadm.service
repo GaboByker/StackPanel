@@ -12,12 +12,9 @@ RestartSec=3
 RuntimeDirectory=stackpanel-sshadm
 RuntimeDirectoryMode=0750
 RuntimeDirectoryPreserve=yes
-# Cambio de sshd a prueba (para revertirlo aunque el agente se reinicie).
 StateDirectory=stackpanel-sshadm
 
-# Administra cuentas: necesita escribir en /etc (passwd, shadow, group,
-# ssh/sshd_config.d) y /home, cambiar dueños y cerrar procesos de un
-# usuario al borrarlo. Nada de red: solo el socket Unix del panel.
+# Escribe en /etc y /home para administrar cuentas; sin red, solo el socket del panel.
 CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH CAP_FOWNER CAP_FSETID CAP_KILL CAP_SETUID CAP_SETGID CAP_AUDIT_WRITE
 ProtectSystem=strict
 ProtectHome=no

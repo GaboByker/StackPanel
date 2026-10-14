@@ -1,20 +1,14 @@
-"""Visor de base de datos por proyecto (tipo mini phpMyAdmin): listar
-tablas, ver filas, correr consultas. Soporta MySQL/MariaDB y Postgres.
-Solo-lectura por defecto; cada conexión tiene su propia casilla para
-permitir escritura."""
+"""Visor de bases de datos por proyecto (MySQL/MariaDB y Postgres). Solo lectura salvo que se permita escritura."""
 import re
 
 SAFE_IDENT_RE = re.compile(r'^[A-Za-z0-9_]+$')
 _WRITE_RE = re.compile(r'^(insert|update|delete|drop|alter|create|truncate|grant|revoke|replace|merge)\b', re.IGNORECASE)
-# Comentarios y espacios iniciales que podrían ocultar la palabra clave de
-# escritura (p. ej. "/*x*/DELETE …" o "-- x\nDROP …") antes del chequeo.
+# Comentarios y espacios iniciales que podrían ocultar una escritura ("/*x*/DELETE …").
 _LEADING_NOISE_RE = re.compile(r'^(\s+|/\*.*?\*/|--[^\n]*\n?|#[^\n]*\n?)', re.DOTALL)
 
 
 def _is_write_query(sql):
-    """True si la consulta modifica datos, saltándose comentarios/espacios
-    iniciales. Conservador: ante la duda (varias sentencias), la trata como
-    escritura para no romper la promesa de 'solo lectura'."""
+    """True si la consulta modifica datos. Ante la duda (varias sentencias) se considera escritura."""
     text = sql or ''
     prev = None
     while text != prev:
@@ -22,14 +16,12 @@ def _is_write_query(sql):
         text = _LEADING_NOISE_RE.sub('', text, count=1)
     if _WRITE_RE.match(text):
         return True
-    # Varias sentencias encadenadas: basta con que una escriba (psycopg2 las
-    # ejecuta todas en un solo execute). El ';' final suelto no cuenta.
+    # psycopg2 ejecuta todas las sentencias encadenadas; el ';' final no cuenta.
     return len(_split_statements(text)) > 1
 
 
 def _split_statements(text):
-    """Separa por ';' respetando comillas simples/dobles y comentarios, para
-    no partir un literal que contenga ';'."""
+    """Separa por ';' respetando comillas y comentarios."""
     stmts, buf = [], []
     i, n = 0, len(text)
     quote = None

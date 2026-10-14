@@ -1,6 +1,4 @@
-"""Primitivas Docker de bajo nivel (crear red/volumen/contenedor, pull de
-imagen, exportar/importar volúmenes como tar) habladas directo por el
-socket de Docker. Usado por el instalador de apps de 1 clic y por backups."""
+"""Operaciones de Docker de bajo nivel (redes, volúmenes, contenedores, imágenes) por el socket."""
 import json
 import os
 import socket
@@ -95,8 +93,7 @@ def remove_container(name, force=True):
 
 
 def connect_network(network, container):
-    """Conecta un contenedor a una red ya existente. Idempotente: si ya
-    estaba conectado, Docker devuelve error pero lo tratamos como éxito."""
+    """Conecta un contenedor a una red; si ya estaba conectado se considera éxito."""
     if not network or not container:
         return False, 'faltan datos'
     status, raw = request('POST', f'/networks/{network}/connect', body={'Container': container})
@@ -109,9 +106,7 @@ def connect_network(network, container):
 
 
 def inspect_container(name):
-    """Config actual de un contenedor ya creado, en el formato que espera
-    create_container, para poder recrearlo agregando algo (ej. un bind
-    nuevo) sin perder su configuración."""
+    """Configuración de un contenedor en el formato de create_container, para recrearlo con cambios."""
     status, raw = request('GET', f'/containers/{name}/json')
     if status != 200:
         return None
@@ -136,8 +131,7 @@ def inspect_container(name):
 
 
 def exec_run(container, cmd, timeout=10):
-    """Corre un comando dentro de un contenedor ya creado y devuelve su
-    exit code (None si no se pudo ni siquiera lanzar el exec)."""
+    """Ejecuta un comando en el contenedor y devuelve el exit code (None si no se pudo lanzar)."""
     status, raw = request('POST', f'/containers/{container}/exec', body={
         'Cmd': cmd,
         'AttachStdout': True,

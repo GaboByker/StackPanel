@@ -1,28 +1,15 @@
 #!/usr/bin/env python3
-"""stackpanel-sshadm: agente del host que administra el acceso SSH a pedido
-del panel: usuarios del sistema, sus claves autorizadas, su contraseña,
-el grupo sudo y la configuración de sshd.
+"""stackpanel-sshadm: usuarios, claves, contraseñas, sudo y sshd del host a pedido del panel.
 
-Va aparte de stackpanel-guard a propósito: el guard solo toca el firewall y
-corre casi sin permisos; este necesita escribir en /etc y /home, así que
-tiene su propio servicio, su propio socket y sus propias reglas.
-
-Reglas que el panel no puede saltarse (se comprueban aquí, no en el panel):
-  - Solo se administran cuentas normales (UID 1000-59999). root nunca.
-  - Los usuarios de PROTECTED_USERS (el admin que instaló esto) no se pueden
-    borrar ni quitar de sudo.
-  - Ningún cambio puede dejar el servidor sin al menos un usuario con sudo
-    capaz de entrar por SSH con la configuración vigente.
-  - Las claves nuevas se validan con ssh-keygen y no se aceptan opciones
-    (command=, from=...). Se escriben sin seguir enlaces simbólicos.
-  - La configuración de sshd va en un archivo propio
-    (/etc/ssh/sshd_config.d/05-stackpanel.conf, que gana a los demás),
-    se valida con `sshd -t` y se aplica A PRUEBA: si no se confirma en
-    CONFIRM_SECONDS, el agente vuelve solo a la anterior. Las conexiones
-    ya abiertas no se cortan al recargar sshd.
-
-Kill switch: `touch /etc/stackpanel-sshadm/disabled` hace que el agente
-rechace todas las órdenes de cambio (solo responde al estado).
+Va separado de stackpanel-guard porque necesita escribir en /etc y /home. Reglas que se
+comprueban aquí y no en el panel:
+  - Solo cuentas normales (UID 1000-59999), nunca root.
+  - PROTECTED_USERS no se pueden borrar ni quitar de sudo.
+  - Siempre queda al menos un usuario con sudo que puede entrar por SSH.
+  - Las claves se validan con ssh-keygen, sin opciones, y se escriben sin seguir enlaces.
+  - sshd se configura en 05-stackpanel.conf, se valida con `sshd -t` y se aplica a prueba:
+    sin confirmación en CONFIRM_SECONDS vuelve sola a la configuración anterior.
+Emergencia: `touch /etc/stackpanel-sshadm/disabled` rechaza todas las órdenes de cambio.
 """
 import grp
 import json
@@ -58,6 +45,8 @@ USERADD = '/usr/sbin/useradd'
 USERDEL = '/usr/sbin/userdel'
 GPASSWD = '/usr/bin/gpasswd'
 CHPASSWD = '/usr/sbin/chpasswd'
+SS = '/usr/bin/ss'
+MAX_PORTS = 4
 _ENV = {'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'LC_ALL': 'C'}
 
 USER_RE = re.compile(r'^[a-z_][a-z0-9_-]{0,31}$')
@@ -74,6 +63,9 @@ SSHD_SETTINGS = {
     'MaxAuthTries': tuple(str(n) for n in range(1, 11)),
     'X11Forwarding': ('yes', 'no'),
 }
+# Port se acumula entre archivos: el panel comenta los Port de los demás y los fija todos aquí.
+PORTS_KEY = 'Ports'
+PORT_MARK = '  # StackPanel: los puertos se fijan en 05-stackpanel.conf'
 
 log = logging.getLogger('stackpanel-sshadm')
 
@@ -247,8 +239,82 @@ def _sshd_effective():
     values = {}
     for line in out.splitlines():
         k, _, v = line.partition(' ')
-        values[k] = v
+        # Port puede repetirse: se juntan todos ("22 2022").
+        values[k] = f'{values[k]} {v}' if k == 'port' and k in values else v
     return values
+
+
+def _listening_tcp_ports():
+    code, out, _ = _run([SS, '-ltnH'], timeout=10)
+    ports = set()
+    for line in out.splitlines():
+        parts = line.split()
+        if len(parts) >= 4:
+            ports.add(parts[3].rsplit(':', 1)[-1])
+    return ports
+
+
+def _ports_of(content):
+    return [line.split()[1] for line in (content or '').splitlines()
+            if len(line.split()) == 2 and line.split()[0] == 'Port']
+
+
+def _other_port_files():
+    """{ruta: contenido} de los demás archivos de sshd que fijan Port."""
+    d = '/etc/ssh/sshd_config.d'
+    files = ['/etc/ssh/sshd_config'] + [
+        os.path.join(d, f) for f in sorted(os.listdir(d)) if f.endswith('.conf') and os.path.join(d, f) != DROPIN
+    ]
+    out = {}
+    for path in files:
+        try:
+            with open(path) as fh:
+                content = fh.read()
+        except OSError:
+            continue
+        if re.search(r'^\s*Port\s', content, re.M | re.I):
+            out[path] = content
+    return out
+
+
+def _comment_ports(content):
+    return re.sub(r'^(\s*Port\s.*)$', lambda m: '# ' + m.group(1) + PORT_MARK, content, flags=re.M | re.I)
+
+
+def _write_file(path, content):
+    tmp = path + '.stackpanel.tmp'
+    with open(tmp, 'w') as fh:
+        fh.write(content)
+    os.chmod(tmp, os.stat(path).st_mode & 0o7777 if os.path.exists(path) else 0o644)
+    os.replace(tmp, path)
+
+
+def _restart_sshd():
+    """Reinicia el listener de sshd. Con ssh.socket hay que regenerar el socket; las sesiones abiertas no se cortan."""
+    if _run([SYSTEMCTL, 'is-active', '--quiet', 'ssh.socket'], timeout=10)[0] == 0:
+        _run([SYSTEMCTL, 'daemon-reload'], timeout=60)
+        code, _, err = _run([SYSTEMCTL, 'restart', 'ssh.socket'], timeout=30)
+    else:
+        code, _, err = _run([SYSTEMCTL, 'restart', 'ssh'], timeout=30)
+    if code != 0:
+        return err or 'systemctl restart falló'
+    expected = set((_sshd_effective().get('port') or '22').split())
+    for _ in range(10):
+        missing = expected - _listening_tcp_ports()
+        if not missing:
+            return None
+        time.sleep(0.5)
+    return f'sshd no quedó escuchando en: {", ".join(sorted(missing))}'
+
+
+def restart_sshd():
+    code, _, err = _run([SSHD, '-t'], timeout=15)
+    if code != 0:
+        raise Refused(f'La configuración actual de sshd no es válida, no se reinicia: {err}')
+    error = _restart_sshd()
+    if error:
+        raise Refused(error)
+    return 'SSH reiniciado'
 
 
 def _can_login(user, sshd):
@@ -275,6 +341,15 @@ def list_users():
             'keys': len(keys), 'key_list': keys, 'keys_error': keys_error,
         })
     return users
+
+
+def reboot_server():
+    # Diferido unos segundos: el agente alcanza a responder y el panel a guardar la auditoría.
+    code, _, err = _run(['/usr/bin/systemd-run', '--on-active=5', '--unit=stackpanel-reboot',
+                         SYSTEMCTL, 'reboot'], timeout=15)
+    if code != 0:
+        raise Refused(f'No se pudo programar el reinicio: {err}')
+    return 'Servidor reiniciándose en 5 segundos'
 
 
 def _check_admin_access(users, sshd, action):
@@ -492,18 +567,39 @@ class SshdConfig:
         os.replace(tmp, DROPIN)
 
     @staticmethod
-    def _apply_and_reload(content):
-        """Escribe el archivo, valida con sshd -t y recarga. Si no valida,
-        lo deja como estaba y lanza Refused."""
+    def _apply_and_reload(content, others=None):
+        """Escribe el archivo (y `others`), valida con sshd -t y recarga. Si algo falla, restaura todo y lanza Refused."""
+        others = others or {}
         previous = SshdConfig._read_dropin()
+        old_ports = (_sshd_effective().get('port') or '22').split()
+        before = {}
+        for path in others:
+            with open(path) as fh:
+                before[path] = fh.read()
+
+        def restore():
+            SshdConfig._write_dropin(previous)
+            for path, text in before.items():
+                _write_file(path, text)
+
         SshdConfig._write_dropin(content)
+        for path, text in others.items():
+            _write_file(path, text)
         code, _, err = _run([SSHD, '-t'], timeout=15)
         if code != 0:
-            SshdConfig._write_dropin(previous)
+            restore()
             raise Refused(f'sshd rechazó la configuración: {err}')
+        new_ports = (_sshd_effective().get('port') or '22').split()
+        if sorted(old_ports) != sorted(new_ports):
+            error = _restart_sshd()
+            if error:
+                restore()
+                _restart_sshd()
+                raise Refused(f'No se pudieron cambiar los puertos: {error}')
+            return
         code, _, err = _run([SYSTEMCTL, 'reload', 'ssh'], timeout=30)
         if code != 0:
-            SshdConfig._write_dropin(previous)
+            restore()
             _run([SYSTEMCTL, 'reload', 'ssh'], timeout=30)
             raise Refused(f'No se pudo recargar sshd: {err}')
 
@@ -515,6 +611,7 @@ class SshdConfig:
             '# ejecuta: sudo systemctl reload ssh',
         ]
         lines += [f'{k} {settings[k]}' for k in SSHD_SETTINGS if k in settings]
+        lines += [f'Port {p}' for p in settings.get(PORTS_KEY, [])]
         return '\n'.join(lines) + '\n'
 
     def managed(self):
@@ -525,14 +622,36 @@ class SshdConfig:
             parts = line.split()
             if len(parts) == 2 and parts[0] in SSHD_SETTINGS:
                 out[parts[0]] = parts[1]
+        out[PORTS_KEY] = _ports_of(content)
         return out
+
+    @staticmethod
+    def _clean_ports(raw):
+        ports = []
+        text = ' '.join(map(str, raw)) if isinstance(raw, list) else str(raw or '')
+        for item in re.split(r'[\s,]+', text):
+            if not item:
+                continue
+            if not item.isdigit() or not 1 <= int(item) <= 65535:
+                raise Refused(f'Puerto no válido: {item}')
+            if str(int(item)) not in ports:
+                ports.append(str(int(item)))
+        if not ports:
+            raise Refused('SSH tiene que quedar con al menos un puerto activo')
+        if len(ports) > MAX_PORTS:
+            raise Refused(f'Como máximo {MAX_PORTS} puertos')
+        ssh_ports = set((_sshd_effective().get('port') or '22').split())
+        for p in ports:
+            if p not in ssh_ports and p in _listening_tcp_ports():
+                raise Refused(f'El puerto {p} ya lo usa otro servicio')
+        return ports
 
     def pending(self):
         p = self.state.get('pending')
         if not p:
             return None
         left = (datetime.fromisoformat(p['deadline']) - _now()).total_seconds()
-        return {**{k: v for k, v in p.items() if k != 'previous'}, 'seconds_left': max(0, int(left))}
+        return {**{k: v for k, v in p.items() if k not in ('previous', 'previous_others')}, 'seconds_left': max(0, int(left))}
 
     def propose(self, settings):
         clean = {}
@@ -541,30 +660,43 @@ class SshdConfig:
             if v not in allowed:
                 raise Refused(f'Valor no válido para {k}')
             clean[k] = v
+        self._propose(clean, self.managed()[PORTS_KEY])
+        return 'Configuración aplicada a prueba'
+
+    def propose_ports(self, ports):
+        current = self.managed()
+        settings = {k: current[k] for k in SSHD_SETTINGS if k in current}
+        self._propose(settings, self._clean_ports(ports))
+        return 'Puertos de SSH aplicados a prueba'
+
+    def _propose(self, clean, ports):
+        clean = {**clean, PORTS_KEY: ports}
         with self.lock:
             if self.state.get('pending'):
                 raise Refused('Ya hay un cambio a prueba: confírmalo o descártalo primero')
             # Comprobar el acceso con la configuración nueva.
             sim = dict(_sshd_effective())
-            sim['passwordauthentication'] = clean['PasswordAuthentication']
+            sim['passwordauthentication'] = clean.get('PasswordAuthentication', sim.get('passwordauthentication'))
             users = list_users()
             _check_admin_access(users, sim, 'Esta configuración')
-            if clean['PermitRootLogin'] != 'yes' and not any(u['sudo'] and _can_login(u, sim) for u in users):
+            if clean.get('PermitRootLogin', sim.get('permitrootlogin')) != 'yes' and not any(u['sudo'] and _can_login(u, sim) for u in users):
                 raise Refused('Sin un usuario con sudo que pueda entrar, no se puede cerrar el acceso de root')
             previous = self._read_dropin()
             content = self.render(clean)
-            if content == previous:
+            # Con puertos propios, los Port de otros archivos se comentan.
+            previous_others = _other_port_files() if ports else {}
+            if content == previous and not previous_others:
                 raise Refused('No hay cambios respecto a la configuración actual')
-            self._apply_and_reload(content)
+            self._apply_and_reload(content, {p: _comment_ports(c) for p, c in previous_others.items()})
             now = _now()
             self.state['pending'] = {
                 'applied_at': now.isoformat(),
                 'deadline': (now + timedelta(seconds=CONFIRM_SECONDS)).isoformat(),
                 'settings': clean,
                 'previous': previous,
+                'previous_others': previous_others,
             }
             self._save()
-        return 'Configuración aplicada a prueba'
 
     def confirm(self):
         with self.lock:
@@ -579,7 +711,7 @@ class SshdConfig:
             p = self.state.get('pending')
             if not p:
                 raise Refused('No hay ningún cambio a prueba')
-            self._apply_and_reload(p.get('previous'))
+            self._apply_and_reload(p.get('previous'), p.get('previous_others'))
             self.state.pop('pending')
             self.state['last_revert'] = {'at': _now().isoformat(), 'reason': reason}
             self._save()
@@ -612,6 +744,8 @@ def status(sshd_conf, conf):
         'sshd': {k: effective.get(k.lower()) for k in SSHD_SETTINGS},
         'sshd_extra': {k: effective.get(k) for k in ('port', 'pubkeyauthentication', 'kbdinteractiveauthentication')},
         'sshd_error': sshd_error,
+        'units': {u: _run([SYSTEMCTL, 'is-active', u], timeout=10)[1] or 'unknown' for u in ('ssh.service', 'ssh.socket')},
+        'listening': sorted(_listening_tcp_ports() & set((effective.get('port') or '').split()), key=int),
         'managed': sshd_conf.managed(),
         'pending': sshd_conf.pending(),
         'last_revert': sshd_conf.state.get('last_revert'),
@@ -648,6 +782,12 @@ def dispatch(req, sshd_conf):
         msg = sshd_conf.confirm()
     elif cmd == 'sshd_revert':
         msg = sshd_conf.revert()
+    elif cmd == 'sshd_ports':
+        msg = sshd_conf.propose_ports(req.get('ports'))
+    elif cmd == 'sshd_restart':
+        msg = restart_sshd()
+    elif cmd == 'server_reboot':
+        msg = reboot_server()
     else:
         return {'ok': False, 'message': 'orden desconocida'}
     log.info('panel: %s', msg)

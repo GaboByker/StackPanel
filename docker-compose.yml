@@ -10,9 +10,9 @@ services:
     environment:
       PUBLIC_HOST: ${PUBLIC_HOST:-localhost}
       PORTAL_PORT: "5005"
-      PORTAL_SECRET_KEY: ${PORTAL_SECRET_KEY:?definí PORTAL_SECRET_KEY en .env}
+      PORTAL_SECRET_KEY: ${PORTAL_SECRET_KEY:?define PORTAL_SECRET_KEY en .env}
       DOCKER_SOCK: /var/run/docker.sock
-      HOST_STACK_ROOT: ${STACK_ROOT:?definí STACK_ROOT en .env}
+      HOST_STACK_ROOT: ${STACK_ROOT:?define STACK_ROOT en .env}
       PORTAL_MAX_UPLOAD_MB: ${PORTAL_MAX_UPLOAD_MB:-512}
       SFTP_PORT: ${SFTP_PORT:-2222}
       PROXY_CONTAINER: stackpanel-proxy
@@ -24,7 +24,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - /run/stackpanel-guard:/run/stackpanel-guard
       - /run/stackpanel-sshadm:/run/stackpanel-sshadm
-      - ${STACK_ROOT:?definí STACK_ROOT en .env}:/stack:ro
+      - ${STACK_ROOT:?define STACK_ROOT en .env}:/stack:ro
       - ./instance:/app/instance
       - ./proxy/sites:/app/proxy-sites
       - ./html:/app/html-rw

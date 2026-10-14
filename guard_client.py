@@ -1,12 +1,4 @@
-"""Cliente del agente del host (stackpanel-guard) por socket Unix.
-
-El panel no tiene permisos sobre el firewall: solo le avisa al agente que
-hubo cambios ("sync") y le pide su estado ("status"). También le pide la
-lista de sesiones SSH del host y que cierre una ("ssh_sessions",
-"ssh_terminate"). Si el agente no está
-instalado o no responde, el panel sigue funcionando igual (los bloqueos
-quedan en la base y el agente los aplica al volver; además relee la base
-cada pocos segundos por su cuenta)."""
+"""Cliente por socket Unix de stackpanel-guard. Si el agente no responde, el panel sigue funcionando."""
 import json
 import os
 import socket

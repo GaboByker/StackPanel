@@ -98,7 +98,7 @@
 </div>
 {% endif %}
 {% else %}
-<p class="admin-hint">El consumo por proyecto se empieza a registrar con esta versión del panel; las gráficas por proyecto aparecerán tras la próxima muestra.</p>
+<p class="admin-hint">Las gráficas por proyecto aparecerán tras la próxima muestra.</p>
 {% endif %}
 
 <details style="margin-top:8px;">
@@ -109,6 +109,13 @@
 			<tbody id="viz-table"></tbody>
 		</table>
 	</div>
+	<nav class="ban-pager" aria-label="Paginado de la tabla de recursos">
+		<span class="admin-hint" style="margin:0;" id="viz-page-info"></span>
+		<div class="ban-pages">
+			<button type="button" class="btn btn-secondary btn-sm" id="viz-prev">‹ Anterior</button>
+			<button type="button" class="btn btn-secondary btn-sm" id="viz-next">Siguiente ›</button>
+		</div>
+	</nav>
 </details>
 
 <script type="application/json" id="viz-data">{{ data|tojson }}</script>
@@ -282,7 +289,18 @@
 			if (D.cpu[i] == null && D.mem[i] == null) continue;
 			html.push('<tr><td>' + dm(times[i]) + ' ' + hm(times[i]) + '</td><td>' + fmtPct(D.cpu[i]) + '</td><td>' + fmtPct(D.mem[i]) + '</td><td>' + fmtPct(D.disk[i]) + '</td></tr>');
 		}
-		tbody.innerHTML = html.join('');
+		var PER = 20, page = 0, pages = Math.max(1, Math.ceil(html.length / PER));
+		var info = document.getElementById('viz-page-info');
+		var prev = document.getElementById('viz-prev'), next = document.getElementById('viz-next');
+		function draw() {
+			tbody.innerHTML = html.slice(page * PER, page * PER + PER).join('');
+			info.textContent = 'Página ' + (page + 1) + ' de ' + pages + ' · ' + html.length + ' muestras';
+			prev.disabled = page === 0;
+			next.disabled = page >= pages - 1;
+		}
+		prev.addEventListener('click', function () { if (page > 0) { page--; draw(); } });
+		next.addEventListener('click', function () { if (page < pages - 1) { page++; draw(); } });
+		draw();
 	}
 })();
 </script>

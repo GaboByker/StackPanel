@@ -1,6 +1,4 @@
-"""Catálogo de apps de 1 clic. Cada plantilla crea su propio contenedor
-(o par app+BD) con datos en una carpeta bajo html/<slug>/, para que quede
-editable desde el explorador y respaldable como cualquier otro proyecto."""
+"""Apps de 1 clic. Cada plantilla crea su contenedor (o app + BD) con los datos en html/<slug>/."""
 import os
 import secrets
 import time
@@ -76,10 +74,7 @@ def write_php_config(local_folder, values):
 
 
 def ensure_php_override_mount(app_container, local_folder, host_folder):
-    """Se asegura de que el contenedor tenga montado el .ini de overrides.
-    Los sitios instalados antes de que existiera esta función no lo tienen,
-    así que hay que recrear el contenedor agregándolo (sin tocar wp-content
-    ni la base, que viven en sus propios binds). Devuelve (ok, err, recreado)."""
+    """Monta el .ini de overrides de PHP, recreando el contenedor si es un sitio antiguo. Devuelve (ok, err, recreado)."""
     if not os.path.isfile(_php_ini_local_path(local_folder)):
         write_php_config(local_folder, DEFAULT_PHP_CONFIG)
 
@@ -107,8 +102,7 @@ def save_php_config(app_container, local_folder, host_folder, values):
     if not ok:
         return False, err
     if not recreated:
-        # El bind ya estaba montado: PHP solo relee el .ini al arrancar,
-        # así que hace falta un restart para que tome los valores nuevos.
+        # PHP solo lee el .ini al arrancar.
         ok, msg = docker_control.stop_containers([app_container])
         if not ok:
             return False, msg
@@ -119,11 +113,7 @@ def save_php_config(app_container, local_folder, host_folder, values):
 
 
 def _wait_mysql_ready(container, attempts=30, delay=1):
-    """MariaDB hace un primer arranque interno para crear la base/usuario
-    antes de quedar lista; si WordPress arranca y alguien entra al sitio en
-    esa ventana, ve 'Error establishing a database connection'. Se espera
-    a que el propio healthcheck de la imagen confirme que ya puede
-    atender conexiones reales."""
+    """Espera al healthcheck de MariaDB; antes, WordPress muestra 'Error establishing a database connection'."""
     for _ in range(attempts):
         if docker_ops.exec_run(container, ['healthcheck.sh', '--connect', '--innodb_initialized']) == 0:
             return True
@@ -140,15 +130,9 @@ def pick_free_port(used_ports, start=20000, end=20999):
 
 
 def install(template, slug, local_folder, host_folder, port, saved_secrets=None):
-    """local_folder: ruta absoluta donde el propio panel escribe archivos
-    (montaje de escritura del panel). host_folder: la misma carpeta pero
-    vista como ruta del host real, la que necesita Docker para los binds,
-    porque el daemon de Docker monta rutas del host, no del contenedor del
-    panel. Devuelve (containers, volumes, secrets, error); secrets se debe
-    guardar en el proyecto y reenviarse aquí mismo si algún día se
-    reinstala/restaura, para que la app recién creada siga usando las
-    mismas credenciales que los datos restaurados (ej. la contraseña que
-    WordPress espera de MariaDB)."""
+    """local_folder: ruta con escritura para el panel; host_folder: la misma vista desde el host (la que usa Docker).
+    Devuelve (containers, volumes, secrets, error). Guarda secrets en el proyecto y vuelve a pasarlos al
+    reinstalar o restaurar, para que la app use las mismas credenciales que los datos."""
     fn = {
         'wordpress': _install_wordpress,
         'static': _install_static,
@@ -166,8 +150,7 @@ def _install_wordpress(slug, local_folder, host_folder, port, saved_secrets):
     app_container = f'{slug}-app'
     db_password = saved_secrets.get('db_password') or secrets.token_hex(12)
     root_password = saved_secrets.get('root_password') or secrets.token_hex(12)
-    # Tag sin versión fija: Docker Hub lo actualiza a la última WordPress
-    # estable para PHP 8.2, así los sitios nuevos no nacen desactualizados.
+    # Etiqueta sin versión fija para que los sitios nuevos usen la última WordPress estable.
     wp_image = 'wordpress:php8.2-apache'
 
     os.makedirs(os.path.join(local_folder, 'db-data'), exist_ok=True)
@@ -179,10 +162,7 @@ def _install_wordpress(slug, local_folder, host_folder, port, saved_secrets):
     ok, err = docker_ops.ensure_image('mariadb:11')
     if not ok:
         return None, None, None, err
-    # A diferencia de ensure_image (que reusa la imagen si ya existe en el
-    # host), acá forzamos el pull para traer la versión vigente aunque haya
-    # quedado una imagen vieja cacheada de una instalación anterior. Si no
-    # hay red pero ya hay una imagen local, seguimos con esa.
+    # Se fuerza el pull para no usar una imagen vieja en caché; sin red, se usa la local.
     ok, err = docker_ops.pull_image(wp_image)
     if not ok and not docker_ops.image_exists(wp_image):
         return None, None, None, err
@@ -226,10 +206,7 @@ def _install_wordpress(slug, local_folder, host_folder, port, saved_secrets):
     if err:
         return None, None, None, err
 
-    # El panel necesita poder alcanzar la base de este sitio para poder
-    # detectarla/explorarla (cada sitio vive en su propia red aislada para
-    # que no se vean entre sí). Best-effort: si falla, el sitio funciona
-    # igual, solo no se podrá auto-detectar la conexión desde el panel.
+    # Conecta el panel a la red del sitio para detectar su base de datos. Si falla, el sitio funciona igual.
     docker_ops.connect_network(network, os.environ.get('HOSTNAME'))
 
     return [db_container, app_container], [], secrets_out, None

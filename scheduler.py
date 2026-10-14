@@ -1,6 +1,4 @@
-"""Hilo de fondo del panel: muestreo de métricas cada 5 min, revisión de
-salud/disco/SSL con notificaciones, y backups automáticos con retención.
-Se inicia una sola vez al arrancar portal-server.py."""
+"""Hilo de fondo: métricas cada 5 min, salud/disco/SSL con avisos y backups automáticos."""
 import os
 import socket
 import ssl
@@ -110,11 +108,7 @@ def _check_ssl(root):
 
 
 def _daily_proxy_reload(root):
-    """certbot (contenedor proxy-certbot) renueva los certificados cada 12 h,
-    pero nginx sigue sirviendo el que cargó al arrancar hasta que se recarga.
-    Sin esto, un certificado renovado no entra en uso y la web caduca igual.
-    Una vez al día: `nginx -t` y, si pasa, `nginx -s reload` (no corta
-    conexiones). Si algo falla, queda en Auditoría."""
+    """Recarga nginx una vez al día para que use los certificados que renueva certbot."""
     today = datetime.now(timezone.utc).date().isoformat()
     if panel_db.get_setting(root, 'proxy_last_reload') == today:
         return
@@ -134,9 +128,7 @@ def _daily_proxy_reload(root):
 
 
 def _run_scheduled_backups(root, stack_root, backups_dir):
-    """Cada proyecto tiene su propio día(s) de la semana + hora + retención
-    (ver panel_db.set_backup_schedule). No hay un horario compartido: cada
-    uno corre cuando el admin lo configuró para ESE proyecto."""
+    """Cada proyecto tiene sus propios días, hora y retención de backup."""
     now = datetime.now()
     weekday = str(now.weekday())  # 0=lunes ... 6=domingo
     today = now.date().isoformat()

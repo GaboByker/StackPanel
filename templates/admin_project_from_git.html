@@ -4,11 +4,9 @@
 {% block content %}
 
 <p class="admin-hint">
-	Cloná uno o más repositorios a una carpeta nueva bajo <code>html/</code>. Si un repo trae su propio
-	<code>Dockerfile</code>, se construye esa imagen; si no, se detecta Python/Node y se corre con una imagen
-	genérica (como "Instalar app"), o se sirve como sitio estático si sólo trae HTML. Agregá varios repos si tu
-	proyecto es backend + frontend separados: quedan en una red privada propia y se pueden llamar entre sí por su
-	"rol" (ej. el frontend le habla al backend como <code>http://backend:8000</code>).
+	Clona uno o más repositorios en una carpeta nueva de <code>html/</code>. Con <code>Dockerfile</code> se construye
+	esa imagen; si no, se detecta Python o Node, o se sirve como sitio estático. Varios repositorios comparten una red
+	privada y se llaman por su rol (p. ej. <code>http://backend:8000</code>).
 </p>
 
 <form method="post" style="max-width:720px;" id="git-form">

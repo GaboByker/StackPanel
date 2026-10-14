@@ -1,19 +1,11 @@
 {% extends "base_admin.html" %}
 {% block title %}Seguridad{% endblock %}
 {% block heading %}Seguridad{% endblock %}
-{% block topbar_actions %}
-<a class="btn btn-secondary btn-sm" href="/admin/audit">Auditoría</a>
-<a class="btn btn-secondary btn-sm" href="/admin/2fa">Mi verificación en dos pasos</a>
-{% endblock %}
 {% block content %}
 
 {% macro fmt(ts) %}{{ ts[:19].replace('T', ' ') if ts else '—' }}{% endmacro %}
 {% macro source_label(src) %}{{ {'auto': 'Automático', 'manual': 'Manual'}.get(src, src) }}{% endmacro %}
 
-<p class="admin-hint">
-	Protección del acceso al panel: cada intento de login y de código 2FA queda registrado, y una IP que acumula demasiados fallos se bloquea sola.
-	Las horas se muestran en UTC. Cada bloqueo se aplica también en el firewall del servidor: la IP queda cortada en <strong>todos los puertos</strong> (SSH, SFTP, webs y proyectos en Docker), no solo en el panel.
-</p>
 
 {% if not my_ip_allowlisted %}
 <article class="admin-service-card" style="margin-bottom:20px; border-color: var(--warn-border); background: var(--warn-bg);">
@@ -28,7 +20,14 @@
 {% endif %}
 
 
-{# ------------------------------------------------------------------ #}
+<nav class="page-tabs" aria-label="Secciones de seguridad">
+	<a href="#tab-resumen">Resumen</a>
+	<a href="#tab-bloqueos">Bloqueos{% if summary.active_bans %} <span class="status-pill stopped">{{ summary.active_bans }}</span>{% endif %}</a>
+	<a href="#tab-registros">Registros</a>
+	<a href="#tab-ajustes">Configuración</a>
+</nav>
+
+<section class="tab-panel" id="tab-resumen">
 <article class="admin-service-card" id="firewall" style="margin-bottom:20px;">
 	<div class="admin-service-head" style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
 		<h3 style="margin:0;">Firewall del servidor</h3>
@@ -49,7 +48,7 @@
 			<div class="stat-tile"><div class="stat-tile-value">{{ (k.allow4 or 0) + (k.allow6 or 0) }}</div><div class="stat-tile-label">Rangos permitidos</div></div>
 			<div class="stat-tile {{ 'accent-danger' if k.dropped_packets else '' }}"><div class="stat-tile-value">{{ '{:,}'.format(k.dropped_packets or 0) }}</div><div class="stat-tile-label">Paquetes descartados</div></div>
 		</div>
-		<p class="admin-hint" style="margin:0 0 8px;">Última revisión: {{ fmt(guard.last_sync) }} · último cambio aplicado: {{ fmt(guard.last_change) }}. El agente relee esta lista cada pocos segundos y, además, se le avisa al instante con cada cambio.</p>
+		<p class="admin-hint" style="margin:0 0 8px;">Última revisión: {{ fmt(guard.last_sync) }} UTC · último cambio: {{ fmt(guard.last_change) }} UTC. Los bloqueos cortan la IP en todos los puertos.</p>
 		{% if guard.last_error %}
 		<p class="admin-hint" style="color:var(--danger-text); margin:0 0 8px;"><strong>Error:</strong> {{ guard.last_error }}</p>
 		{% endif %}
@@ -71,7 +70,7 @@
 			<button type="submit" class="btn btn-secondary btn-sm">Sincronizar ahora</button>
 		</form>
 	{% else %}
-		<p class="admin-hint" style="margin:10px 0 0;">El agente <code>stackpanel-guard</code> no responde ({{ guard_error }}). Los bloqueos solo se aplican al panel hasta que el agente esté en marcha. Para instalarlo, ejecuta por SSH en la carpeta del panel: <code>sudo ./guard/install-guard.sh</code></p>
+		<p class="admin-hint" style="margin:10px 0 0;">El agente <code>stackpanel-guard</code> no responde ({{ guard_error }}). Instálalo por SSH: <code>sudo ./guard/install-guard.sh</code></p>
 	{% endif %}
 </article>
 
@@ -142,8 +141,10 @@
 </p>
 {% endif %}
 
-{# ------------------------------------------------------------------ #}
-<h2 class="landing-section-title" id="bloqueos" style="margin-top:28px;">IPs bloqueadas</h2>
+</section>
+
+<section class="tab-panel" id="tab-bloqueos">
+<h2 class="landing-section-title" id="bloqueos">IPs bloqueadas</h2>
 
 {# Macros genéricas para las tablas con buscador/orden/paginado. "p" es el
    prefijo de la tabla en la URL (b = bloqueos, h = historial, e = intentos). #}
@@ -190,7 +191,7 @@
 		{{ hidden_params([p ~ 'per', p ~ 'page']) }}
 		<label for="{{ p }}per" class="admin-hint" style="margin:0;">Por página</label>
 		<select id="{{ p }}per" name="{{ p }}per" onchange="this.form.submit()">
-			{% for n in [25, 50, 100] %}<option value="{{ n }}" {{ 'selected' if t.per_page == n else '' }}>{{ n }}</option>{% endfor %}
+			{% for n in [10, 25, 50, 100] %}<option value="{{ n }}" {{ 'selected' if t.per_page == n else '' }}>{{ n }}</option>{% endfor %}
 		</select>
 		<noscript><button type="submit" class="btn btn-secondary btn-sm">Aplicar</button></noscript>
 	</form>
@@ -210,23 +211,6 @@
 </span>
 {%- endmacro %}
 
-<style>
-.ban-toolbar { display:flex; flex-wrap:wrap; gap:8px 12px; align-items:center; justify-content:space-between; margin:0 0 10px; }
-.ban-search { display:flex; gap:8px; align-items:center; flex:1 1 320px; max-width:520px; }
-.ban-search input[type="search"] { flex:1; min-width:0; }
-.ban-sort { color:inherit; text-decoration:none; display:inline-flex; align-items:center; gap:4px; white-space:nowrap; }
-.ban-sort:hover { color:var(--accent); }
-.ban-sort-icon { font-size:10px; color:var(--text-faint, var(--text-muted)); }
-.ban-sort.is-active .ban-sort-icon { color:var(--accent); }
-.ban-pager { display:flex; flex-wrap:wrap; gap:6px; align-items:center; justify-content:space-between; margin-top:10px; }
-.ban-pages { display:flex; flex-wrap:wrap; gap:4px; }
-.ban-pages a, .ban-pages span { min-width:32px; text-align:center; padding:4px 8px; border:1px solid var(--border); border-radius:6px; font-size:var(--fs-xs); text-decoration:none; color:var(--text); }
-.ban-pages a:hover { border-color:var(--accent); color:var(--accent); }
-.ban-pages .is-current { background:var(--accent); border-color:var(--accent); color:#fff; font-weight:600; }
-.ban-pages .is-disabled { opacity:.4; }
-mark.ban-hit { background:var(--warn-bg); color:inherit; border-radius:3px; padding:0 1px; }
-.sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
-</style>
 
 <div class="ban-toolbar">
 	{{ search_box(bans, 'b', 'bloqueos', 'Buscar IP, servicio, motivo, origen…', 'Buscar en IPs bloqueadas') }}
@@ -269,7 +253,36 @@ mark.ban-hit { background:var(--warn-bg); color:inherit; border-radius:3px; padd
 </div>
 {{ pager(bans, 'b', 'bloqueos', 'IPs bloqueadas') }}
 
-<article class="admin-service-card" style="max-width:720px; margin-top:16px;">
+
+
+<h2 class="landing-section-title" id="lista-blanca" style="margin-top:28px;">Lista blanca</h2>
+<p class="admin-hint">Estas IPs nunca se bloquean. Agrega solo IPs fijas de confianza.</p>
+<div class="admin-table-wrap">
+	<table class="admin-table">
+		<thead><tr><th>IP / rango</th><th>Nota</th><th>Agregada</th><th>Por</th><th></th></tr></thead>
+		<tbody>
+			{% for a in allowlist %}
+			<tr>
+				<td><code>{{ a.cidr }}</code>{% if a.cidr.split('/')[0] == my_ip %} <span class="status-pill running">Tu IP</span>{% endif %}</td>
+				<td>{{ a.note or '—' }}</td>
+				<td>{{ fmt(a.created_at) }}</td>
+				<td>{{ a.created_by or '—' }}</td>
+				<td>
+					<form method="post" action="/admin/security/allow/{{ a.id }}/delete" onsubmit="return confirm('¿Quitar {{ a.cidr }} de la lista blanca?');">
+						<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+						<button type="submit" class="btn btn-danger btn-sm">Quitar</button>
+					</form>
+				</td>
+			</tr>
+			{% else %}
+			<tr><td colspan="5" class="htop-loading">La lista blanca está vacía.</td></tr>
+			{% endfor %}
+		</tbody>
+	</table>
+</div>
+
+<div class="cards-2" style="margin-top:16px;">
+<article class="admin-service-card">
 	<div class="admin-service-head"><h3>Bloquear una IP a mano</h3></div>
 	<form method="post" action="/admin/security/ban">
 		<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
@@ -295,35 +308,7 @@ mark.ban-hit { background:var(--warn-bg); color:inherit; border-radius:3px; padd
 		<p class="admin-hint" style="margin:10px 0 0;">No se puede bloquear un rango que incluya tu IP ni uno que se solape con la lista blanca.</p>
 	</form>
 </article>
-
-{# ------------------------------------------------------------------ #}
-<h2 class="landing-section-title" id="lista-blanca" style="margin-top:28px;">Lista blanca</h2>
-<p class="admin-hint">Estas IPs nunca se bloquean y pueden iniciar sesión aunque la cuenta esté siendo atacada desde otras IPs. Agrega aquí solo las IPs fijas en las que confías.</p>
-<div class="admin-table-wrap">
-	<table class="admin-table">
-		<thead><tr><th>IP / rango</th><th>Nota</th><th>Agregada</th><th>Por</th><th></th></tr></thead>
-		<tbody>
-			{% for a in allowlist %}
-			<tr>
-				<td><code>{{ a.cidr }}</code>{% if a.cidr.split('/')[0] == my_ip %} <span class="status-pill running">Tu IP</span>{% endif %}</td>
-				<td>{{ a.note or '—' }}</td>
-				<td>{{ fmt(a.created_at) }}</td>
-				<td>{{ a.created_by or '—' }}</td>
-				<td>
-					<form method="post" action="/admin/security/allow/{{ a.id }}/delete" onsubmit="return confirm('¿Quitar {{ a.cidr }} de la lista blanca?');">
-						<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-						<button type="submit" class="btn btn-danger btn-sm">Quitar</button>
-					</form>
-				</td>
-			</tr>
-			{% else %}
-			<tr><td colspan="5" class="htop-loading">La lista blanca está vacía.</td></tr>
-			{% endfor %}
-		</tbody>
-	</table>
-</div>
-
-<article class="admin-service-card" style="max-width:720px; margin-top:16px;">
+<article class="admin-service-card">
 	<div class="admin-service-head"><h3>Agregar a la lista blanca</h3></div>
 	<form method="post" action="/admin/security/allow">
 		<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
@@ -340,14 +325,13 @@ mark.ban-hit { background:var(--warn-bg); color:inherit; border-radius:3px; padd
 		<button type="submit" class="btn btn-primary">Agregar</button>
 	</form>
 </article>
+</div>
+</section>
 
-{# ------------------------------------------------------------------ #}
-<h2 class="landing-section-title" id="deteccion" style="margin-top:28px;">Detección automática en el servidor</h2>
-<p class="admin-hint">
-	El agente del servidor lee estos logs en vivo y bloquea, en todos los puertos, a las IPs que superan el límite. Los números de las últimas 24 h vienen de la base del panel.
-	<strong>Solo observar</strong> registra los intentos y anota en Auditoría a quién se habría bloqueado, sin bloquearlo: sirve para probar una regla antes de activarla.
-	El panel tiene su propia regla, en "Reglas", más abajo.
-</p>
+<section class="tab-panel" id="tab-ajustes">
+
+<h2 class="landing-section-title" id="deteccion">Detección automática</h2>
+<p class="admin-hint"><strong>Solo observar</strong> registra sin bloquear: útil para probar una regla.</p>
 <form method="post" action="/admin/security/jails">
 	<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
 	<div class="admin-table-wrap">
@@ -391,13 +375,13 @@ mark.ban-hit { background:var(--warn-bg); color:inherit; border-radius:3px; padd
 			</tbody>
 		</table>
 	</div>
-	<p class="admin-hint" style="margin:8px 0 12px;">Cada reincidencia de la misma IP en 30 días multiplica la duración del bloqueo según la tarjeta <a href="#reincidencia">Reincidencia</a>, sin pasar del máximo definido allí. Las IPs de la lista blanca nunca se cuentan.</p>
 	<button type="submit" class="btn btn-primary">Guardar detección</button>
 </form>
 
 {# ------------------------------------------------------------------ #}
 <h2 class="landing-section-title" id="reglas" style="margin-top:28px;">Reglas</h2>
-<form method="post" action="/admin/security/rules" style="max-width:720px;">
+<form method="post" action="/admin/security/rules">
+<div class="cards-2">
 	<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
 	<article class="admin-service-card" style="margin-bottom:16px;">
 		<div class="admin-service-head"><h3>Bloqueo automático del login del panel</h3></div>
@@ -415,12 +399,11 @@ mark.ban-hit { background:var(--warn-bg); color:inherit; border-radius:3px; padd
 			<label for="r-ban">Primer bloqueo (minutos)</label>
 			<input type="number" id="r-ban" name="sec_ban_minutes" min="1" max="525600" value="{{ rules.sec_ban_minutes }}" required/>
 		</div>
-		<p class="admin-hint" style="margin:0;">Solo para el login del panel. Las reglas de SSH, SFTP y Web están en <a href="#deteccion">Detección automática</a>.</p>
 	</article>
 
 	<article class="admin-service-card" id="reincidencia" style="margin-bottom:16px;">
 		<div class="admin-service-head"><h3>Reincidencia (todos los servicios)</h3></div>
-		<p class="admin-hint" style="margin:0 0 12px;">Se aplica a <strong>todos</strong> los bloqueos automáticos: panel, SSH, SFTP y Web. Si una IP vuelve a ser bloqueada dentro de 30 días, cada bloqueo nuevo dura lo que el anterior multiplicado por este valor, sin pasar del máximo. La duración de partida es la de cada servicio.</p>
+		<p class="admin-hint" style="margin:0 0 12px;">Si una IP vuelve a ser bloqueada en 30 días, el bloqueo se multiplica por este valor (hasta el máximo).</p>
 		<div class="form-row">
 			<div class="field">
 				<label for="r-mult">Multiplicador por reincidencia</label>
@@ -431,7 +414,7 @@ mark.ban-hit { background:var(--warn-bg); color:inherit; border-radius:3px; padd
 				<input type="number" id="r-banmax" name="sec_ban_max_minutes" min="1" max="525600" value="{{ rules.sec_ban_max_minutes }}" required/>
 			</div>
 		</div>
-		<p class="admin-hint" style="margin:0 0 8px;">Multiplicador 1 = sin aumento (todas las veces dura lo mismo). Máximo actual: {{ rules.sec_ban_max_minutes }} min ({{ recidive_max }}).</p>
+		<p class="admin-hint" style="margin:0 0 8px;">Máximo actual: {{ recidive_max }}.</p>
 		<div class="admin-table-wrap">
 			<table class="admin-table">
 				<thead><tr><th>Servicio</th><th>1.ª vez</th><th>2.ª</th><th>3.ª</th><th>4.ª</th><th>5.ª</th></tr></thead>
@@ -445,7 +428,6 @@ mark.ban-hit { background:var(--warn-bg); color:inherit; border-radius:3px; padd
 				</tbody>
 			</table>
 		</div>
-		<p class="admin-hint" style="margin:8px 0 0;">Ejemplo con los valores guardados. Si cambias los números, pulsa "Guardar reglas" para ver la tabla actualizada.</p>
 	</article>
 
 	<article class="admin-service-card" style="margin-bottom:16px;">
@@ -454,11 +436,10 @@ mark.ban-hit { background:var(--warn-bg); color:inherit; border-radius:3px; padd
 			<label for="r-acct">Fallos por cuenta (desde cualquier IP) antes de pausarla</label>
 			<input type="number" id="r-acct" name="sec_account_max_failures" min="1" max="1000" value="{{ rules.sec_account_max_failures }}" required/>
 		</div>
-		<p class="admin-hint" style="margin:0 0 12px;">Frena ataques distribuidos desde muchas IPs contra un mismo correo. Mientras la cuenta esté pausada solo se puede entrar desde una IP de la lista blanca.</p>
+		<p class="admin-hint" style="margin:0 0 12px;">Pausada, solo se entra desde la lista blanca.</p>
 		<label class="checkbox-row">
 			<input type="checkbox" name="sec_require_2fa" {{ 'checked' if rules.sec_require_2fa else '' }}/> Exigir verificación en dos pasos (2FA) a todos los administradores
 		</label>
-		<p class="admin-hint" style="margin:6px 0 0;">Quien no la tenga activa será llevado a configurarla antes de poder usar el panel.</p>
 	</article>
 
 	<article class="admin-service-card" style="margin-bottom:16px;" id="sesiones">
@@ -475,16 +456,24 @@ mark.ban-hit { background:var(--warn-bg); color:inherit; border-radius:3px; padd
 		</div>
 	</article>
 
-	<button type="submit" class="btn btn-primary">Guardar reglas</button>
+</div>
+	<div class="admin-actions" style="margin-top:0;">
+		<button type="submit" class="btn btn-primary">Guardar reglas</button>
+		<button type="submit" class="btn btn-danger" form="revoke-sessions" data-confirm="Se cerrarán todas las sesiones de todos los administradores, excepto la tuya. ¿Continuar?">Cerrar las demás sesiones</button>
+	</div>
 </form>
-
-<form method="post" action="/admin/security/sessions/revoke" style="margin-top:14px;" onsubmit="return confirm('Se cerrarán todas las sesiones abiertas de todos los administradores, excepto la tuya. ¿Continuar?');">
+<form method="post" action="/admin/security/sessions/revoke" id="revoke-sessions">
 	<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-	<button type="submit" class="btn btn-danger">Cerrar todas las sesiones (excepto la mía)</button>
 </form>
 
-{# ------------------------------------------------------------------ #}
-<h2 class="landing-section-title" id="intentos" style="margin-top:28px;">Últimos intentos de acceso</h2>
+<p class="admin-hint" style="margin-top:24px;">
+	IP detectada para esta sesión: <code>{{ my_ip }}</code>.
+	{% if trusted_proxies %}Proxies de confianza: <code>{{ trusted_proxies }}</code>.{% else %}X-Forwarded-For se ignora (sin <code>PORTAL_TRUSTED_PROXIES</code>).{% endif %}
+</p>
+</section>
+
+<section class="tab-panel" id="tab-registros">
+<h2 class="landing-section-title" id="intentos">Últimos intentos de acceso</h2>
 <p class="admin-hint">
 	Servicio:
 	{% if not service_filter %}<strong>Todos</strong>{% else %}<a href="{{ turl({'service': None, 'epage': None}, 'intentos') }}">Todos</a>{% endif %}
@@ -538,7 +527,6 @@ mark.ban-hit { background:var(--warn-bg); color:inherit; border-radius:3px; padd
 {{ pager(events, 'e', 'intentos', 'intentos de acceso') }}
 
 <h2 class="landing-section-title" id="historial" style="margin-top:28px;">Historial de bloqueos</h2>
-<p class="admin-hint">Bloqueos que ya terminaron, porque vencieron o porque alguien los quitó.</p>
 <div class="ban-toolbar">
 	{{ search_box(history, 'h', 'historial', 'Buscar IP, servicio, motivo, quién desbloqueó…', 'Buscar en el historial de bloqueos') }}
 	{{ count_hint(history, 'bloqueo terminado', 'bloqueos terminados') }}
@@ -570,11 +558,7 @@ mark.ban-hit { background:var(--warn-bg); color:inherit; border-radius:3px; padd
 	</table>
 </div>
 {{ pager(history, 'h', 'historial', 'historial de bloqueos') }}
-
-<p class="admin-hint" style="margin-top:24px;">
-	IP detectada para esta sesión: <code>{{ my_ip }}</code>.
-	{% if trusted_proxies %}Proxies de confianza (X-Forwarded-For): <code>{{ trusted_proxies }}</code>.{% else %}Las cabeceras X-Forwarded-For se ignoran (no hay proxies de confianza declarados en <code>PORTAL_TRUSTED_PROXIES</code>), así que nadie puede falsificar su IP.{% endif %}
-</p>
+</section>
 
 {% endblock %}
 

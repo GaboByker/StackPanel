@@ -1,13 +1,4 @@
-"""Historial de accesos SSH/SFTP correctos y aviso de IPs nuevas.
-
-Los datos los escribe stackpanel-guard en auth_events (success = 1) al leer
-los logs de sshd y del contenedor SFTP; aquí solo se consultan. Las sesiones
-abiertas ahora mismo no están en la base: se le piden al agente
-(guard_client.ssh_sessions).
-
-"IP nueva" = primer acceso correcto de ese usuario desde esa IP en ese
-servicio dentro del periodo que se conserva (LOGIN_RETENTION_DAYS).
-"""
+"""Historial de accesos SSH/SFTP correctos (los escribe stackpanel-guard) y aviso de IPs nuevas."""
 from datetime import datetime, timedelta, timezone
 
 import notification_control
@@ -15,7 +6,7 @@ import panel_db
 
 SERVICES = {'sshd': 'SSH', 'sftp': 'SFTP'}
 LOGIN_RETENTION_DAYS = 365
-PAGE_SIZES = (25, 50, 100)
+PAGE_SIZES = (10, 25, 50, 100)
 _NOTIFIED_KEY = 'ssh_login_notified_id'
 _SVC_IN = "service IN ('sshd', 'sftp')"
 # Primer acceso de ese usuario+IP+servicio (no hay otro correcto anterior).
@@ -96,9 +87,7 @@ def known_ips(root, limit=50):
 
 
 def notify_new_ips(root):
-    """Avisa de accesos correctos desde una IP nueva para ese usuario. Se
-    llama desde el scheduler; la primera vez solo marca hasta dónde se leyó,
-    para no avisar de todo el historial de golpe."""
+    """Avisa de accesos desde IPs nuevas. La primera vez solo marca hasta dónde leyó."""
     last = panel_db.get_setting(root, _NOTIFIED_KEY)
     with _connect(root) as conn:
         max_id = conn.execute('SELECT COALESCE(MAX(id), 0) FROM auth_events').fetchone()[0]

@@ -1,12 +1,7 @@
-"""Sesiones de login abiertas en el host (SSH, consola) vía systemd-logind.
+"""Sesiones abiertas en el host vía systemd-logind.
 
-El panel no ve el host: le pide al agente la lista ("ssh_sessions") y, si el
-admin lo decide, que cierre una ("ssh_terminate"). Solo se cierran sesiones
-remotas de sshd, y solo por un Id que esté en la lista en ese momento: nada
-de lo que llega por el socket se pasa a un comando sin validarlo.
-
-Cerrar una sesión termina todos sus procesos, incluidos los que quedaron
-vivos al desconectarse (tmux, screen, nohup): por eso la lista los muestra.
+Solo se cierran sesiones SSH remotas y por un Id que esté en la lista en ese momento.
+Cerrar una sesión termina todos sus procesos, incluidos tmux, screen o nohup.
 """
 import os
 import re
@@ -80,8 +75,7 @@ def list_sessions():
             'service': info.get('Service', ''),
             'tty': info.get('TTY', '') or None,
             'started_at': _parse_ts(info.get('Timestamp', '')),
-            # active/online: conectada. closing: el usuario ya se fue pero
-            # quedan procesos de esa sesión corriendo (tmux, screen...).
+            # closing: el usuario ya salió pero quedan procesos de la sesión (tmux, screen...).
             'state': info.get('State', ''),
             'process_count': total,
             'processes': names,

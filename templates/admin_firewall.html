@@ -1,9 +1,6 @@
 {% extends "base_admin.html" %}
 {% block title %}Firewall{% endblock %}
 {% block heading %}Firewall{% endblock %}
-{% block topbar_actions %}
-<a class="btn btn-secondary btn-sm" href="/admin/security">Seguridad e IPs bloqueadas</a>
-{% endblock %}
 {% block content %}
 
 {% if pending %}
@@ -33,13 +30,10 @@
 <p class="admin-hint">El servidor todavía aplica el cambio a prueba anterior; se actualizará en unos segundos.</p>
 {% endif %}
 
-<p class="admin-hint">
-	Decide quién puede entrar a cada puerto del servidor, incluidos los que publican los contenedores de Docker (que UFW no controla).
-	<strong>Público</strong>: cualquiera. <strong>Solo IPs permitidas</strong>: solo las IPs o rangos que indiques. <strong>Cerrado</strong>: nadie desde internet; el proxy, los demás contenedores y el propio servidor sí siguen llegando (útil para proyectos que ya sirves por dominio a través del proxy).
-</p>
+<p class="admin-hint"><strong>Cerrado</strong> bloquea internet, pero el proxy y los contenedores siguen llegando.</p>
 <p class="admin-hint">
 	Siempre entran: las IPs de la <a href="/admin/security#lista-blanca">lista blanca</a>{% if guard and guard.static_allow %} y la lista de emergencia del servidor ({% for n in guard.static_allow %}<code>{{ n }}</code>{{ ', ' if not loop.last else '' }}{% endfor %}){% endif %}.
-	Las conexiones ya abiertas no se cortan al cambiar una regla. Tu IP es <code>{{ my_ip }}</code> y entras al panel por el puerto <code>{{ panel_port }}</code>.
+	Tu IP: <code>{{ my_ip }}</code> · panel en el puerto <code>{{ panel_port }}</code>.
 </p>
 {% if docker_err %}<p class="admin-hint" style="color:var(--danger-text);">No se pudo leer la lista de contenedores: {{ docker_err }}</p>{% endif %}
 
@@ -96,7 +90,6 @@
 {% if guard and guard.kernel %}
 <p class="admin-hint" style="margin-top:20px;">Conexiones rechazadas por reglas de puertos desde que se cargó la tabla: <strong>{{ '{:,}'.format(guard.kernel.port_drop_packets or 0) }}</strong> paquetes.</p>
 {% endif %}
-<p class="admin-hint">Mientras UFW siga activo, los servicios nativos del servidor (no Docker) necesitan además estar permitidos en UFW: marcar uno como "Público" aquí no lo abre si UFW lo bloquea.</p>
 
 {% endblock %}
 

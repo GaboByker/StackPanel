@@ -1,6 +1,4 @@
-"""Datos para las gráficas de /admin/resources: historial del host y por
-proyecto, agrupado en intervalos para que el navegador dibuje pocas
-decenas/cientos de puntos aunque el rango sea de 7 días."""
+"""Datos de las gráficas de /admin/resources, agrupados en intervalos para dibujar pocos puntos."""
 import os
 from datetime import datetime, timedelta, timezone
 
@@ -48,8 +46,7 @@ def build(root, range_key):
     known_cpus = next((r['cpus'] for r in reversed(host_rows) if r.get('cpus')), None)
     cpus = known_cpus or os.cpu_count() or 1
 
-    # Docker da la CPU sumada por núcleo (400 % = 4 núcleos al tope); se pasa a
-    # porcentaje de la capacidad total del servidor.
+    # Docker suma la CPU por núcleo (400 % = 4 núcleos); se pasa a % de la capacidad total.
     def cpu_share(value, row_cpus=None):
         if value is None:
             return None
@@ -87,8 +84,7 @@ def build(root, range_key):
         per_cpu.setdefault(key, [0.0] * n)[i] += cpu_share(row['cpu_percent']) or 0.0
         per_mem.setdefault(key, [0] * n)[i] += row['memory_bytes'] or 0
 
-    # Los proyectos con color son los que más memoria usan en los últimos 7 días,
-    # no en el rango elegido, para que no cambien de color al cambiar de rango.
+    # El color depende del uso de memoria de 7 días, para que no cambie al cambiar de rango.
     week_mem = {}
     for row in (project_rows if hours == 168 else panel_db.list_project_metrics_history(root, hours=168)):
         week_mem[row['project_key']] = week_mem.get(row['project_key'], 0) + (row['memory_bytes'] or 0)

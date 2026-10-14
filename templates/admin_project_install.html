@@ -3,7 +3,7 @@
 {% block heading %}Instalar app{% endblock %}
 {% block content %}
 
-<p class="admin-hint">Cada instalación crea su propio contenedor (o app + base de datos), con sus archivos en una carpeta nueva bajo <code>html/</code>, sin tocar los proyectos que ya están corriendo. Se te asigna un puerto libre automáticamente.</p>
+<p class="admin-hint">Cada app se instala en su propio contenedor y carpeta bajo <code>html/</code>, con un puerto libre.</p>
 
 <div class="admin-services">
 	{% for key, tpl in templates.items() %}

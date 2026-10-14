@@ -1,8 +1,4 @@
-"""Detecta credenciales de base de datos en el .env de un proyecto y prueba
-varias formas de conectar (host.docker.internal con el puerto publicado, o
-el nombre del servicio/contenedor de su docker-compose.yml) hasta encontrar
-una que funcione de verdad. Así, agregar la conexión en "Bases de datos" es
-un solo clic, sin tener que ir a buscar las credenciales a mano."""
+"""Detecta las credenciales de BD en el .env de un proyecto y prueba conexiones hasta encontrar una que funcione."""
 import json
 import os
 import re
@@ -17,9 +13,7 @@ _ENV_PATTERNS = [
     ('mysql', 'MARIADB_USER', 'MARIADB_PASSWORD', 'MARIADB_DATABASE', 'MARIADB_PORT', 3306),
 ]
 
-# Apps instaladas con el instalador de 1 clic del panel: no tienen .env (las
-# credenciales se pasan directo como variables del contenedor), pero como el
-# panel las generó, ya sabemos exactamente cómo conectarnos.
+# Apps de 1 clic: no tienen .env, pero el panel generó sus credenciales.
 _TEMPLATE_CONVENTIONS = {
     'wordpress': lambda slug, secrets: {
         'engine': 'mysql',
@@ -43,9 +37,7 @@ def detect_from_template(project):
     except (TypeError, ValueError):
         project_secrets = {}
     candidate = builder(slug, project_secrets)
-    # Cada sitio vive en su propia red de Docker aislada de los demás; el
-    # panel necesita unirse a esa red para poder alcanzar la base. Si ya
-    # está conectado (instalaciones nuevas) esto no hace nada.
+    # Cada sitio tiene su propia red; el panel se une para alcanzar la base (no hace nada si ya está).
     docker_ops.connect_network(f'{slug}-net', os.environ.get('HOSTNAME'))
     return candidate
 
@@ -65,8 +57,7 @@ def _read_env(folder):
 
 
 def _compose_service_names(folder):
-    """Nombres de contenedor que suenen a base de datos, leídos del
-    docker-compose.yml del proyecto (si existe), para probarlos como host."""
+    """Nombres de contenedor del docker-compose.yml que parecen bases de datos."""
     names = []
     for fname in ('docker-compose.yml', 'docker-compose.yaml'):
         path = os.path.join(folder, fname)

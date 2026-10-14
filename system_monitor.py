@@ -6,20 +6,14 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from docker_control import MANAGED_SERVICES, _container_states, _docker_request, _resolve_service_containers
 import panel_db
 
-# Ruta desde la que se mide el almacenamiento del host. El contenedor del portal
-# monta el home del host (solo lectura) en /stack; fuera de Docker, se usa '/'.
+# El panel monta el home del host en /stack; fuera de Docker se mide '/'.
 _DISK_PATH = '/stack' if os.path.isdir('/stack') else '/'
 
 PORTAL_ROOT = os.path.dirname(os.path.abspath(__file__))
 
 
 def _all_services(states):
-    """MANAGED_SERVICES (fijos, en código) + proyectos registrados en el panel
-    que tienen contenedores asociados. Así el monitor incluye cualquier
-    proyecto nuevo sin tener que tocar código cada vez que se agrega uno.
-    Si un proyecto de la base de datos comparte algún contenedor con un
-    servicio fijo (p.ej. quedó registrado dos veces), se descarta entero
-    para no contar esos contenedores dos veces ni mostrar una fila duplicada."""
+    """El proxy más los proyectos registrados con contenedores (sin repetir contenedores)."""
     managed_containers = set()
     for meta in MANAGED_SERVICES.values():
         managed_containers.update(_resolve_service_containers(meta, states))

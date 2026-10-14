@@ -2,12 +2,6 @@
 {% from '_ssh_nav.html' import ssh_tabs %}
 {% block title %}Accesos SSH{% endblock %}
 {% block heading %}Accesos SSH{% endblock %}
-{% block topbar_actions %}
-<div class="ssh-topbar-actions">
-	<a class="btn btn-secondary btn-sm" href="/admin/security">IPs bloqueadas</a>
-	<a class="btn btn-secondary btn-sm" href="/admin/notifications">Avisos</a>
-</div>
-{% endblock %}
 {% block content %}
 {{ ssh_tabs('access') }}
 
@@ -17,10 +11,7 @@
 /admin/ssh?{{ merged | dictsort | selectattr(1) | list | urlencode }}#accesos
 {%- endmacro %}
 
-<p class="admin-hint">
-	Quién entra al servidor por SSH y a los proyectos por SFTP, y quién está conectado ahora mismo. Los datos los recoge el agente <code>stackpanel-guard</code> de los logs del servidor.
-	Las horas se muestran en UTC. Los accesos correctos se conservan {{ retention_days }} días; tu IP actual es <code>{{ my_ip }}</code>.
-</p>
+<p class="admin-hint">Horas en UTC · historial de {{ retention_days }} días · tu IP: <code>{{ my_ip }}</code></p>
 
 <div class="stats-grid" style="margin-bottom:20px;">
 	<div class="stat-tile"><div class="stat-tile-value">{{ sessions|selectattr('can_terminate')|selectattr('state', 'in', ['active', 'online'])|list|length if sessions is not none else '—' }}</div><div class="stat-tile-label">Conexiones SSH activas</div></div>
@@ -36,10 +27,7 @@
 	<p style="margin:0;"><strong>No se pudo pedir la lista al agente</strong> ({{ sessions_error }}). Si acabas de actualizar el panel, actualiza también el agente por SSH desde la carpeta del panel: <code>sudo ./guard/install-guard.sh</code></p>
 </article>
 {% else %}
-<p class="admin-hint">
-	Una sesión <strong>activa</strong> es alguien conectado ahora. <strong>Con procesos vivos</strong> significa que el usuario ya se desconectó pero dejó programas en marcha (tmux, screen, un comando con <code>nohup</code>…).
-	Al cerrar una sesión terminan <strong>todos</strong> sus procesos, también esos. La conexión SFTP de los proyectos no aparece aquí: corre dentro de su propio contenedor.
-</p>
+<p class="admin-hint">Cerrar una sesión termina todos sus procesos (incluidos tmux/screen).</p>
 <div class="admin-table-wrap">
 	<table class="admin-table">
 		<thead><tr><th>Usuario</th><th>Origen</th><th>Terminal</th><th>Inicio</th><th>Estado</th><th>Procesos</th><th><span class="sr-only">Acciones</span></th></tr></thead>
@@ -97,7 +85,7 @@
 
 {# ------------------------------------------------------------------ #}
 <h2 class="landing-section-title" id="conocidas" style="margin-top:28px;">Desde dónde entra cada usuario</h2>
-<p class="admin-hint">Una fila por usuario e IP. Si aparece una combinación que no reconoces, revísala en el historial de abajo y bloquéala desde <a href="/admin/security#bloqueos">Seguridad</a>.</p>
+<p class="admin-hint">¿No reconoces una IP? Bloquéala en <a href="/admin/security#bloqueos">Protección</a>.</p>
 <div class="admin-table-wrap">
 	<table class="admin-table">
 		<thead><tr><th>Servicio</th><th>Usuario</th><th>IP</th><th>Accesos</th><th>Primero</th><th>Último</th></tr></thead>
@@ -160,6 +148,5 @@
 	{% if logins.page < logins.pages %}<a class="btn btn-secondary btn-sm" href="{{ surl({'page': logins.page + 1}) }}">Siguiente ›</a>{% endif %}
 </nav>
 {% endif %}
-<p class="admin-hint" style="margin-top:14px;">Para recibir un aviso cada vez que alguien entra desde una IP nueva, activa «Alguien entra por SSH o SFTP desde una IP nueva» en <a href="/admin/notifications">Notificaciones</a>.</p>
 
 {% endblock %}

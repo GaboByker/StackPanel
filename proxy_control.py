@@ -1,5 +1,4 @@
-"""Generación de sitios Nginx + recarga y emisión de certificados SSL,
-todo hablando directo con el socket de Docker (sin dependencias extra)."""
+"""Sitios de Nginx, recarga y certificados SSL por el socket de Docker."""
 import json
 import os
 import re
@@ -86,14 +85,8 @@ def _site_filename(domain):
 
 
 def render_site_conf(domain, target_host, target_port, ssl_ready):
-    # Se usa "resolver" + variable en proxy_pass, en vez de un bloque
-    # "upstream" con IP fija, para que nginx vuelva a resolver el nombre en
-    # cada request. Si no, cuando el contenedor destino se recrea (ej. al
-    # reiniciarlo a mano) le toca IP nueva y el sitio queda en 502 hasta el
-    # próximo "nginx -s reload".
-    # Excepción: host.docker.internal vive solo en /etc/hosts, que el
-    # "resolver" de nginx no lee (daría "could not be resolved"); su IP no
-    # cambia, así que va directo y nginx la resuelve al cargar.
+    # resolver + variable hace que nginx resuelva el nombre en cada petición (evita 502 si el
+    # contenedor cambia de IP). host.docker.internal solo está en /etc/hosts y va directo.
     if target_host == 'host.docker.internal' or re.fullmatch(r'[0-9.]+', target_host):
         upstream_lines = f'        proxy_pass http://{target_host}:{target_port};\n'
     else:
@@ -194,8 +187,7 @@ def issue_certificate(domain, email, certbot_container=CERTBOT_CONTAINER):
         'certbot', 'certonly', '--webroot', '-w', '/var/www/certbot',
         '-d', domain, '--agree-tos', '--no-eff-email', '--non-interactive',
     ]
-    # Sin correo configurado Let's Encrypt igual emite, solo que no avisa
-    # por mail antes de que venza (el panel ya avisa por su cuenta).
+    # Sin correo Let's Encrypt emite igual, pero no avisa del vencimiento.
     cmd += ['--email', email] if email else ['--register-unsafely-without-email']
     code, out = docker_exec(certbot_container, cmd, timeout=120)
     return code == 0, out

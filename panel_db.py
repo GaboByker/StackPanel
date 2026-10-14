@@ -10,10 +10,7 @@ DOMAIN_RE = re.compile(
     r'^(?=.{1,253}$)(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,63}$'
 )
 KEY_RE = re.compile(r'^[a-z0-9][a-z0-9-]{0,63}$')
-# Hostname/IP para el destino interno de un sitio del proxy (ej. "backend",
-# "host.docker.internal", "10.0.0.5"). Deliberadamente estricto: esto se
-# inserta tal cual dentro de un archivo .conf de nginx, así que no puede
-# llevar espacios, comillas, llaves ni saltos de línea.
+# Destino interno de un sitio del proxy. Se inserta tal cual en el .conf de nginx: sin espacios, comillas ni llaves.
 TARGET_HOST_RE = re.compile(r'^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,253}[A-Za-z0-9])?$')
 
 
@@ -126,6 +123,18 @@ def init_db(root):
                 admin_email TEXT,
                 action TEXT NOT NULL,
                 detail TEXT
+            )
+            '''
+        )
+        conn.execute(
+            '''
+            CREATE TABLE IF NOT EXISTS notification_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts TEXT NOT NULL,
+                event TEXT NOT NULL,
+                title TEXT NOT NULL,
+                message TEXT,
+                seen INTEGER NOT NULL DEFAULT 0
             )
             '''
         )
@@ -507,8 +516,7 @@ def set_settings(root, values):
 # --- historial de métricas ------------------------------------------------
 
 def _metrics_cutoff(hours):
-    # Los ts se guardan en ISO con 'T'; comparar contra datetime('now') de SQLite
-    # (con espacio) dejaba pasar filas de hasta un día de más.
+    # Los ts se guardan en ISO con 'T'; compararlos con datetime('now') de SQLite dejaba pasar un día de más.
     return (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
 
 
@@ -596,7 +604,7 @@ def delete_database(root, db_id):
 
 
 # --- accesos SFTP por proyecto ----------------------------------------------
-# uid arranca en 3000 para no chocar con usuarios/servicios del sistema.
+# Los uid empiezan en 3000 para no chocar con usuarios del sistema.
 _SFTP_UID_BASE = 3000
 
 
@@ -656,6 +664,43 @@ def log_action(root, admin_email, action, detail=''):
             'INSERT INTO audit_log (ts, admin_email, action, detail) VALUES (?, ?, ?, ?)',
             (_now(), admin_email, action, detail),
         )
+
+
+# --- historial de notificaciones (lo que se ve en la campana) ----------------
+
+def log_notification(root, event, title, message):
+    since = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+    with _connect(root) as conn:
+        # Los chequeos periódicos repiten el mismo aviso en cada vuelta: uno por hora basta.
+        if conn.execute(
+            'SELECT 1 FROM notification_log WHERE title = ? AND ts >= ? LIMIT 1', (title, since)
+        ).fetchone():
+            return
+        conn.execute(
+            'INSERT INTO notification_log (ts, event, title, message) VALUES (?, ?, ?, ?)',
+            (_now(), event, title, message),
+        )
+        # ponytail: se guardan solo las 500 más recientes; subir si hace falta más historial.
+        conn.execute('DELETE FROM notification_log WHERE id <= (SELECT MAX(id) - 500 FROM notification_log)')
+
+
+def list_notifications(root, limit=50, offset=0):
+    with _connect(root) as conn:
+        rows = conn.execute(
+            'SELECT * FROM notification_log ORDER BY id DESC LIMIT ? OFFSET ?', (limit, offset)
+        ).fetchall()
+        total = conn.execute('SELECT COUNT(*) FROM notification_log').fetchone()[0]
+    return [dict(row) for row in rows], total
+
+
+def unseen_notifications(root):
+    with _connect(root) as conn:
+        return conn.execute('SELECT COUNT(*) FROM notification_log WHERE seen = 0').fetchone()[0]
+
+
+def mark_notifications_seen(root):
+    with _connect(root) as conn:
+        conn.execute('UPDATE notification_log SET seen = 1 WHERE seen = 0')
 
 
 def list_audit(root, limit=200):

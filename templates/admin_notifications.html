@@ -3,12 +3,49 @@
 {% block heading %}Notificaciones{% endblock %}
 {% block content %}
 
-<p class="admin-hint">Configura tus propios canales. Nada se envía a menos que actives la casilla del canal y la del tipo de aviso.</p>
+{% set event_labels = {'project_down': 'Proyecto caído', 'disk_full': 'Disco', 'ssl_expiring': 'SSL', 'security_ban': 'Bloqueo', 'ssh_new_ip': 'SSH', 'test': 'Prueba'} %}
+<nav class="page-tabs" aria-label="Secciones de notificaciones">
+	<a href="#actividad">Actividad{% if total %} <span class="status-pill custom">{{ total }}</span>{% endif %}</a>
+	<a href="#canales">Canales y avisos</a>
+</nav>
 
-<form method="post" style="max-width:620px;">
+<section class="tab-panel" id="actividad">
+	<div class="admin-table-wrap">
+		<table class="admin-table">
+			<thead><tr><th>Fecha (UTC)</th><th>Tipo</th><th>Evento</th><th>Detalle</th></tr></thead>
+			<tbody>
+				{% for n in items %}
+				<tr>
+					<td style="white-space:nowrap;">{{ n.ts[:16].replace('T', ' ') }}</td>
+					<td><span class="status-pill {{ 'stopped' if n.event in ('project_down', 'disk_full', 'security_ban') else 'pending' if n.event in ('ssl_expiring', 'ssh_new_ip') else 'custom' }}">{{ event_labels.get(n.event, n.event) }}</span></td>
+					<td><strong>{{ n.title }}</strong></td>
+					<td style="overflow-wrap:anywhere;">{{ n.message }}</td>
+				</tr>
+				{% else %}
+				<tr><td colspan="4" class="htop-loading">Todavía no ha pasado nada. Aquí aparecerán caídas, bloqueos, accesos SSH nuevos, disco y SSL.</td></tr>
+				{% endfor %}
+			</tbody>
+		</table>
+	</div>
+	{% if pages > 1 %}
+	<nav class="ban-pager" aria-label="Paginado de notificaciones">
+		<span class="admin-hint" style="margin:0;">Página {{ page }} de {{ pages }} · {{ total }} en total</span>
+		<div class="ban-pages">
+			{% if page > 1 %}<a href="?page={{ page - 1 }}#actividad">‹ Anterior</a>{% endif %}
+			{% if page < pages %}<a href="?page={{ page + 1 }}#actividad">Siguiente ›</a>{% endif %}
+		</div>
+	</nav>
+	{% endif %}
+</section>
+
+<section class="tab-panel" id="canales">
+<p class="admin-hint">Solo se envía si activas el canal y el tipo de aviso. El historial de Actividad se guarda siempre.</p>
+
+<form method="post">
+<div class="cards-2">
 	<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
 
-	<article class="admin-service-card" style="margin-bottom:16px;">
+	<article class="admin-service-card">
 		<div class="admin-service-head"><h3>Discord</h3></div>
 		<label class="checkbox-row" style="margin-bottom:10px;">
 			<input type="checkbox" name="discord_enabled" {{ 'checked' if cfg.discord_enabled == '1' else '' }}/> Activar Discord
@@ -19,7 +56,7 @@
 		</div>
 	</article>
 
-	<article class="admin-service-card" style="margin-bottom:16px;">
+	<article class="admin-service-card">
 		<div class="admin-service-head"><h3>Slack</h3></div>
 		<label class="checkbox-row" style="margin-bottom:10px;">
 			<input type="checkbox" name="slack_enabled" {{ 'checked' if cfg.slack_enabled == '1' else '' }}/> Activar Slack
@@ -30,7 +67,7 @@
 		</div>
 	</article>
 
-	<article class="admin-service-card" style="margin-bottom:16px;">
+	<article class="admin-service-card">
 		<div class="admin-service-head"><h3>Email (SMTP)</h3></div>
 		<label class="checkbox-row" style="margin-bottom:10px;">
 			<input type="checkbox" name="smtp_enabled" {{ 'checked' if cfg.smtp_enabled == '1' else '' }}/> Activar email
@@ -52,7 +89,7 @@
 		</label>
 	</article>
 
-	<article class="admin-service-card" style="margin-bottom:16px;">
+	<article class="admin-service-card">
 		<div class="admin-service-head"><h3>Qué avisar</h3></div>
 		<label class="checkbox-row" style="margin-bottom:8px;">
 			<input type="checkbox" name="notify_project_down" {{ 'checked' if cfg.notify_project_down == '1' else '' }}/> Un proyecto se cae inesperadamente
@@ -71,12 +108,16 @@
 		</label>
 	</article>
 
-	<button type="submit" class="btn btn-primary">Guardar</button>
+</div>
+	<div class="admin-actions" style="margin-top:0;">
+		<button type="submit" class="btn btn-primary">Guardar</button>
+		<button type="submit" class="btn btn-secondary" form="notif-test">Enviar prueba</button>
+	</div>
 </form>
 
-<form method="post" action="/admin/notifications/test" style="margin-top:14px;">
+<form method="post" action="/admin/notifications/test" id="notif-test">
 	<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-	<button type="submit" class="btn btn-secondary">Enviar prueba a los canales activados</button>
 </form>
+</section>
 
 {% endblock %}

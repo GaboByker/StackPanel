@@ -1,15 +1,9 @@
-"""Seguridad del panel: registro de intentos de acceso, bloqueo automático y
-manual de IPs, lista blanca y reglas configurables desde /admin/security.
+"""Seguridad del panel: intentos de acceso, bloqueos de IPs, lista blanca y reglas.
 
-Todo vive en la base de datos (tablas ip_bans, ip_allowlist, auth_events y
-claves sec_* en settings) para que sea la única fuente de verdad: hoy la usa
-el propio panel para bloquear su login, y más adelante el agente del host
-(stackpanel-guard) leerá estas mismas tablas para llevar los bloqueos a
-nftables y extenderlos a SSH/SFTP/nginx.
-
-Reglas anti-bloqueo propio:
-  - Una IP en la lista blanca nunca se bloquea (ni automática ni manualmente).
-  - No se puede bloquear a mano un rango que contenga la IP desde la que estás.
+Las tablas ip_bans, ip_allowlist y auth_events son la única fuente de verdad;
+el agente stackpanel-guard las lee para aplicar los bloqueos en nftables.
+Una IP de la lista blanca nunca se bloquea, y no se puede bloquear a mano un
+rango que contenga la IP propia.
 """
 import ipaddress
 import json
@@ -22,8 +16,7 @@ import guard_client
 import notification_control
 import panel_db
 
-# Valores por defecto de las reglas; cada uno se puede cambiar desde el panel.
-# (clave, defecto, mínimo, máximo)
+# (clave, defecto, mínimo, máximo); todas se pueden cambiar desde el panel.
 RULES = {
     'sec_max_failures': (5, 1, 100),          # fallos por IP antes de bloquearla
     'sec_window_minutes': (10, 1, 1440),      # ventana en la que se cuentan
@@ -36,12 +29,10 @@ RULES = {
     'sec_require_2fa': (0, 0, 1),             # exigir 2FA a todos los admins
 }
 
-# Mismo criterio que aplica el agente del host: rangos más amplios que esto
-# no se bloquean (un /8 por error dejaría fuera a medio país).
+# Igual que en el agente: no se bloquean rangos más amplios (un /8 por error dejaría fuera a medio país).
 MIN_BAN_PREFIX = {4: 16, 6: 48}
 
-# Detección automática en el servidor (la ejecuta stackpanel-guard, ver
-# guard/detector.py, que trae los mismos valores por defecto).
+# Valores por defecto de la detección que hace stackpanel-guard (guard/detector.py).
 JAILS = {
     'sshd': {
         'label': 'SSH del servidor', 'source': 'journald (sshd)',
@@ -140,8 +131,7 @@ def init_db(root):
 # --- utilidades de IP ---------------------------------------------------------
 
 def parse_network(value):
-    """Acepta una IP suelta o un rango CIDR (v4 o v6). Devuelve el texto
-    normalizado, o None si no es válido."""
+    """IP suelta o rango CIDR (v4 o v6) normalizado, o None si no es válido."""
     value = (value or '').strip()
     if not value:
         return None
@@ -171,15 +161,12 @@ def _trusted_proxies():
 
 
 def client_ip(request):
-    """IP real del cliente. Solo se cree en X-Forwarded-For si la conexión
-    llega desde un proxy declarado en PORTAL_TRUSTED_PROXIES (si no, cualquiera
-    podría falsificar la cabecera y esquivar los bloqueos)."""
+    """IP real del cliente. X-Forwarded-For solo se acepta desde proxies de PORTAL_TRUSTED_PROXIES."""
     remote = request.remote_addr or ''
     proxies = _trusted_proxies()
     if proxies and _in_any(remote, proxies):
         forwarded = [p.strip() for p in request.headers.get('X-Forwarded-For', '').split(',') if p.strip()]
-        # Se recorre de derecha a izquierda saltando proxies propios: el
-        # primero que no sea de confianza es el cliente real.
+        # De derecha a izquierda: la primera IP que no es un proxy propio es el cliente.
         for hop in reversed(forwarded):
             if not _in_any(hop, proxies):
                 try:
@@ -236,9 +223,7 @@ def get_jails(root):
 
 
 def ensure_jail_defaults(root):
-    """Guarda la configuración de detección si todavía no existe, para que
-    el agente del host use los nombres de contenedor de ESTA instalación
-    (él no ve las variables de entorno del panel)."""
+    """Guarda la configuración de detección si no existe; el agente no ve las variables de entorno del panel."""
     if panel_db.get_setting(root, 'sec_jails'):
         return
     panel_db.set_settings(root, {'sec_jails': json.dumps(
@@ -422,10 +407,7 @@ def _auto_ban_minutes(root, ip, rules):
 
 
 def recidive_minutes(base, previous, rules):
-    """Duración de un bloqueo automático tras `previous` bloqueos anteriores
-    de la misma IP. Misma fórmula que usa el agente (guard/detector.py) para
-    SSH, SFTP y Web: crece con el multiplicador hasta el máximo, salvo que la
-    duración inicial del servicio ya sea mayor que ese máximo."""
+    """Duración de un bloqueo automático tras `previous` bloqueos de la misma IP (misma fórmula que guard/detector.py)."""
     return min(base * (max(1, rules['sec_ban_multiplier']) ** previous),
                max(base, rules['sec_ban_max_minutes']))
 
@@ -439,8 +421,7 @@ def human_minutes(minutes):
 
 
 def recidive_examples(rules, jails):
-    """Tabla de ejemplo para la tarjeta de reincidencia: duración de la 1.ª
-    a la 5.ª caída de una misma IP en cada servicio con los valores actuales."""
+    """Duración de la 1.ª a la 5.ª reincidencia de una IP en cada servicio, con los valores actuales."""
     services = [('Panel (login)', rules['sec_ban_minutes'], 'ban')]
     services += [(j['label'], j['ban_minutes'], j['mode']) for j in jails.values()]
     rows = []
@@ -458,8 +439,7 @@ def recidive_examples(rules, jails):
 # --- registro de intentos -----------------------------------------------------
 
 def record_attempt(root, ip, kind, email, success, user_agent=''):
-    """Registra un intento de login/2FA. Si es un fallo y la IP supera el
-    límite de la ventana, la bloquea. Devuelve el cidr bloqueado o None."""
+    """Registra un intento de login/2FA y bloquea la IP si supera el límite. Devuelve el CIDR bloqueado o None."""
     with _connect(root) as conn:
         conn.execute(
             'INSERT INTO auth_events (ts, ip, kind, email, success, user_agent) VALUES (?, ?, ?, ?, ?, ?)',
@@ -499,9 +479,7 @@ def record_attempt(root, ip, kind, email, success, user_agent=''):
 
 
 def account_locked(root, email, ip):
-    """True si la cuenta acumula demasiados fallos desde cualquier IP (ataque
-    distribuido). Las IPs de la lista blanca siempre pueden intentar, para
-    que un atacante no pueda dejar al admin fuera de su propio panel."""
+    """True si la cuenta acumula demasiados fallos desde cualquier IP. La lista blanca siempre puede intentar."""
     if not email or is_allowlisted(root, ip):
         return False
     rules = get_rules(root)
@@ -537,9 +515,7 @@ def list_events(root, limit=100, failures_only=False, service=None):
 
 
 def notify_pending_bans(root):
-    """Resumen de los bloqueos automáticos nuevos (los del servidor los crea
-    el agente, que no tiene acceso a las notificaciones). Se llama desde el
-    scheduler: un solo mensaje por vuelta en lugar de uno por IP."""
+    """Un solo aviso por vuelta del scheduler con los bloqueos automáticos nuevos (el agente no puede notificar)."""
     with _connect(root) as conn:
         rows = conn.execute(
             "SELECT id, cidr, service, source FROM ip_bans WHERE notified = 0 ORDER BY id"
@@ -592,8 +568,7 @@ def summary(root):
 
 def prune(root):
     cutoff = _iso(_now() - timedelta(days=EVENT_RETENTION_DAYS))
-    # Los accesos SSH/SFTP correctos son el historial de /admin/ssh: se
-    # guardan más tiempo (son pocos comparados con los intentos fallidos).
+    # Los accesos SSH/SFTP correctos forman el historial de /admin/ssh y se guardan más tiempo.
     login_cutoff = _iso(_now() - timedelta(days=LOGIN_RETENTION_DAYS))
     with _connect(root) as conn:
         conn.execute(
@@ -629,8 +604,7 @@ def _top_path(x, y, w, h):
 
 
 def attack_chart(root, hours=24):
-    """Intentos fallidos por hora y servicio, ya convertidos a geometría SVG
-    (barras apiladas) para dibujarlos sin librerías en la plantilla."""
+    """Intentos fallidos por hora y servicio, ya convertidos a barras SVG apiladas."""
     now = _now().replace(minute=0, second=0, microsecond=0)
     start = now - timedelta(hours=hours - 1)
     with _connect(root) as conn:
@@ -689,7 +663,7 @@ def attack_chart(root, hours=24):
 
 BAN_SORTS = ('cidr', 'service', 'reason', 'source', 'created_at', 'expires_at', 'ended_at')
 EVENT_SORTS = {'ts': 'ts', 'service': 'service', 'ip': 'ip', 'email': 'email', 'success': 'success'}
-PAGE_SIZES = (25, 50, 100)
+PAGE_SIZES = (10, 25, 50, 100)
 BAN_PAGE_SIZES = PAGE_SIZES
 _FAR_FUTURE = '9999'
 _SOURCE_SEARCH = {'auto': 'automático automatico', 'manual': 'manual'}
@@ -730,9 +704,7 @@ def _all_inactive_bans(root):
 
 
 def query_bans(root, active=True, q='', sort='created_at', direction='desc', page=1, per_page=25):
-    """Bloqueos (activos o el historial) filtrados, ordenados y paginados. Se
-    hace en Python para poder buscar por etiqueta ("SSH", "Automático") y
-    ordenar las IPs por valor numérico y no como texto."""
+    """Bloqueos filtrados, ordenados y paginados en Python para buscar por etiqueta y ordenar IPs como números."""
     sort = sort if sort in BAN_SORTS else 'created_at'
     direction = 'asc' if direction == 'asc' else 'desc'
     rows = list_active_bans(root) if active else _all_inactive_bans(root)

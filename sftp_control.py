@@ -1,15 +1,7 @@
-"""Contenedor SFTP compartido (atmoz/sftp): un usuario aislado (chroot) por
-cada acceso que se crea desde un proyecto, sin tocar el código cada vez.
+"""Contenedor SFTP compartido (atmoz/sftp) con un usuario aislado (chroot) por acceso.
 
-Cada usuario ve únicamente la carpeta de SU proyecto (no puede ni saber que
-existen los demás). El permiso de escritura se controla igualando el grupo
-(gid) del usuario al dueño real de la carpeta en el host (que ya es
-group-writable) para "rw", o montando la carpeta en modo solo-lectura para
-"ro" — no se toca el dueño de ningún archivo existente.
-
-Como el bind de cada usuario es fijo al crear el contenedor, agregar/quitar/
-cambiar un acceso recrea el contenedor entero (pocos segundos, tira las
-sesiones SFTP activas de todos los proyectos, no solo la que cambió).
+La escritura se da igualando el gid del usuario al grupo dueño de la carpeta; la lectura,
+montándola en solo lectura. Cambiar un acceso recrea el contenedor y corta todas las sesiones.
 """
 import os
 
@@ -23,11 +15,7 @@ SFTP_PORT = int(os.environ.get('SFTP_PORT', '2222'))
 
 
 def folder_group_writable(stack_root, folder):
-    """True si el grupo dueño de la carpeta tiene permiso de escritura (así
-    es como se le da "escritura" a un acceso SFTP: no se toca el dueño de
-    ningún archivo). Si la carpeta es de root y no es group-writable (p.ej.
-    quedó creada por un contenedor corriendo como root), un acceso SFTP con
-    "escritura" no va a poder subir nada aunque el toggle diga que sí."""
+    """True si el grupo dueño de la carpeta puede escribir; si no, un acceso "rw" no podrá subir nada."""
     try:
         return bool(os.stat(os.path.join(stack_root, folder)).st_mode & 0o020)
     except OSError:
@@ -35,8 +23,7 @@ def folder_group_writable(stack_root, folder):
 
 
 def _folder_gid(stack_root, folder):
-    """gid dueño de la carpeta del proyecto en el host, para que un usuario
-    con ese mismo gid pueda escribir ahí (ya es group-writable)."""
+    """gid dueño de la carpeta del proyecto en el host."""
     try:
         return os.stat(os.path.join(stack_root, folder)).st_gid
     except OSError:
@@ -44,8 +31,7 @@ def _folder_gid(stack_root, folder):
 
 
 def sync(root, stack_root, host_stack_root):
-    """Recrea el contenedor SFTP con los usuarios activos en la base de
-    datos. Se llama después de crear/borrar/editar cualquier acceso."""
+    """Recrea el contenedor SFTP con los usuarios activos de la base."""
     users = panel_db.list_sftp_users(root)
     if not users:
         docker_ops.remove_container(CONTAINER_NAME)
@@ -70,8 +56,7 @@ def sync(root, stack_root, host_stack_root):
         host_folder = os.path.join(host_stack_root, project['folder'])
         mode = '' if user['allow_write'] else ':ro'
         binds.append(f"{host_folder}:/home/{user['username']}/files{mode}")
-        # El campo "e" le dice al entrypoint que password_hash ya viene
-        # encriptado (chpasswd -e); si no, lo tomaría como texto plano.
+        # "e" indica al entrypoint que la contraseña ya viene cifrada (chpasswd -e).
         cmd.append(f"{user['username']}:{user['password_hash']}:e:{user['uid']}:{gid}:files")
 
     if not cmd:

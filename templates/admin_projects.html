@@ -8,18 +8,19 @@
 		<button type="button" class="view-switch-btn" data-view="cards" title="Tarjetas">{{ icon_grid(cls='icon icon-sm') }}</button>
 		<button type="button" class="view-switch-btn" data-view="list" title="Lista">{{ icon_list(cls='icon icon-sm') }}</button>
 	</div>
-	<div class="admin-actions" style="margin:0;">
-		<a class="btn btn-secondary btn-sm" href="/admin/projects/scan">Escanear html/</a>
-		<a class="btn btn-secondary btn-sm" href="/admin/projects/restore">Restaurar backup</a>
-		<a class="btn btn-secondary btn-sm" href="/admin/projects/install">{{ icon_bolt(cls='icon icon-sm') }} Instalar app</a>
-		<a class="btn btn-secondary btn-sm" href="/admin/projects/from-git">{{ icon_code(cls='icon icon-sm') }} Desde Git</a>
-		<a class="btn btn-primary btn-sm" href="/admin/projects/new">+ Nuevo proyecto</a>
-	</div>
+	<details class="menu-btn">
+		<summary class="btn btn-primary btn-sm">+ Agregar proyecto</summary>
+		<div class="menu-btn-list">
+			<a href="/admin/projects/install">{{ icon_bolt(cls='icon icon-sm') }} Instalar app (WordPress, Node…)</a>
+			<a href="/admin/projects/from-git">{{ icon_code(cls='icon icon-sm') }} Desde un repositorio Git</a>
+			<a href="/admin/projects/new">{{ icon_cog(cls='icon icon-sm') }} Registrar uno existente</a>
+			<a href="/admin/projects/scan">{{ icon_database(cls='icon icon-sm') }} Escanear carpeta html/</a>
+			<a href="/admin/projects/restore">{{ icon_archive(cls='icon icon-sm') }} Restaurar desde backup</a>
+		</div>
+	</details>
 </div>
 {% endblock %}
 {% block content %}
-
-<p class="admin-hint">Estas son las tarjetas que ven los visitantes en el portal público. Para backups, base de datos, variables de entorno, límites y más, entra a "Detalles".</p>
 
 {% if projects %}
 <div class="stats-grid">

@@ -69,6 +69,6 @@
 		{% if not unlock_left %}<span class="admin-hint">Desbloquea arriba para crear usuarios.</span>{% endif %}
 	</div>
 </form>
-<p class="admin-hint" style="margin-top:12px;">¿Cómo se consigue la clave pública? En el ordenador de la persona: <code>ssh-keygen -t ed25519</code> y luego copiar el contenido de <code>~/.ssh/id_ed25519.pub</code>. La clave privada (sin <code>.pub</code>) nunca se comparte.</p>
+<p class="admin-hint" style="margin-top:12px;">Clave pública: <code>ssh-keygen -t ed25519</code> y copiar <code>~/.ssh/id_ed25519.pub</code>.</p>
 {% endif %}
 {% endblock %}

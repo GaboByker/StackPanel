@@ -10,19 +10,14 @@ ExecStart=/usr/bin/python3 /usr/local/lib/stackpanel-guard/stackpanel_guard.py r
 Restart=always
 RestartSec=3
 
-# El socket vive en /run/stackpanel-guard; se conserva entre reinicios del
-# servicio para que el bind-mount del contenedor del panel siga siendo válido.
+# Se conserva entre reinicios para que el montaje del panel siga siendo válido.
 RuntimeDirectory=stackpanel-guard
 RuntimeDirectoryMode=0750
 RuntimeDirectoryPreserve=yes
-# Posición de lectura de cada log (para no perder ni repetir líneas).
 StateDirectory=stackpanel-guard
 
-# Solo lo necesario: administrar nftables, leer logs (journald y Docker),
-# escribir en la base del panel los intentos y bloqueos detectados y cerrar
-# sesiones SSH a pedido del admin (CAP_KILL, que logind exige para
-# terminate-session). La carpeta de la base se habilita con un drop-in que
-# crea install-guard.sh.
+# nftables, lectura de logs y cierre de sesiones SSH (CAP_KILL). La escritura en la
+# base del panel la habilita un drop-in de install-guard.sh.
 CapabilityBoundingSet=CAP_NET_ADMIN CAP_DAC_READ_SEARCH CAP_KILL
 NoNewPrivileges=yes
 ProtectSystem=strict

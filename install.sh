@@ -1,28 +1,23 @@
 #!/usr/bin/env bash
-# Instalador de StackPanel: descarga el código (sin necesitar git), crea la
-# estructura de carpetas y levanta los contenedores con Docker Compose.
-#
-# Uso:
+# Instalador y actualizador de StackPanel.
 #   curl -fsSL https://raw.githubusercontent.com/GaboByker/StackPanel/main/install.sh | bash
 #
 # Variables opcionales:
-#   STACKPANEL_DIR     directorio de instalación (default: ~/stackpanel)
-#   STACKPANEL_BRANCH  rama a instalar (default: main)
-#   PORTAL_PORT         puerto del panel si no querés que se elija solo
-#   STACKPANEL_GUARD    0 = no instalar el agente de firewall (stackpanel-guard)
-#   STACKPANEL_SSHADM   0 = no instalar la gestión de usuarios/claves/sshd (stackpanel-sshadm)
-#   STACKPANEL_MOTD     0 = no poner el logo en el mensaje de bienvenida de SSH
-#   STACKPANEL_KEEP_PROVIDER_MOTD  1 = no ocultar el mensaje del proveedor (/etc/motd)
-#   SSHADM_PROTECTED_USERS  usuarios que el panel nunca puede borrar (por defecto, quien instala)
-#   STACKPANEL_SRC      carpeta local con el código, en vez de descargarlo
-#                       (para probar cambios antes de publicarlos)
+#   STACKPANEL_DIR                 carpeta de instalación (por defecto ~/stackpanel)
+#   STACKPANEL_BRANCH              rama (por defecto main)
+#   STACKPANEL_SRC                 carpeta local con el código, en lugar de descargarlo
+#   PORTAL_PORT                    puerto del panel
+#   STACKPANEL_GUARD=0             no instalar el firewall (stackpanel-guard)
+#   STACKPANEL_SSHADM=0            no instalar la gestión de SSH (stackpanel-sshadm)
+#   SSHADM_PROTECTED_USERS         usuarios que el panel no puede borrar (por defecto, quien instala)
+#   STACKPANEL_MOTD=0              no mostrar el logo al entrar por SSH
+#   STACKPANEL_KEEP_PROVIDER_MOTD=1  no ocultar el mensaje del proveedor (/etc/motd)
 set -euo pipefail
 
 REPO="GaboByker/StackPanel"
 BRANCH="${STACKPANEL_BRANCH:-main}"
 INSTALL_DIR="${STACKPANEL_DIR:-$HOME/stackpanel}"
 
-# Logo de StackPanel en ASCII (en azul si la salida es una terminal).
 if [ -t 1 ]; then printf '\033[1;34m'; fi
 cat <<'BANNER'
                 ▄▄██▄▄
@@ -56,24 +51,18 @@ port_in_use() {
 
 if ! command -v docker >/dev/null 2>&1; then
     cat >&2 <<'MSG'
-Docker no está instalado. Instalalo primero y volvé a correr este script.
+Docker no está instalado. Instálalo y vuelve a ejecutar este script:
 
   curl -fsSL https://get.docker.com | sh
   sudo usermod -aG docker "$USER"
-  newgrp docker   # activa el grupo ya, sin cerrar sesión
+  newgrp docker
 
-El paso de usermod/newgrp es obligatorio: sin él, "docker" falla con
-"permission denied" aunque ya hayas agregado el usuario al grupo, porque
-Linux solo revisa la membresía de grupos al iniciar sesión.
-
-Nota: ese script es para desarrollo/pruebas rápidas. Para producción, Docker
-recomienda el repositorio apt oficial de tu distro en su lugar:
-https://docs.docker.com/engine/install/
+Más opciones: https://docs.docker.com/engine/install/
 MSG
     exit 1
 fi
 if ! docker compose version >/dev/null 2>&1; then
-    echo "Necesitás el plugin 'docker compose' (v2): https://docs.docker.com/compose/install/" >&2
+    echo "Falta el plugin 'docker compose' (v2): https://docs.docker.com/compose/install/" >&2
     exit 1
 fi
 
@@ -97,10 +86,7 @@ cd "${INSTALL_DIR}"
 echo "==> Creando carpetas de datos (html/, backups/, proxy/sites/, instance/)..."
 mkdir -p html backups proxy/sites instance
 
-# IP de esta máquina en la red local (LAN). Es la que sirve desde la misma
-# red: detrás de un router, la IP pública no anda desde adentro y el puerto
-# no está redirigido. Se ignoran las interfaces de Docker (docker0, br-*,
-# 172.17+), que no son accesibles desde otras máquinas.
+# IP de la red local; detrás de un router la pública no funciona desde dentro.
 is_docker_ip() {
     case "$1" in
         172.1[7-9].*|172.2[0-9].*|172.3[01].*) return 0 ;;
@@ -117,7 +103,6 @@ detect_local_ip() {
             echo "${ip}"; return
         fi
     fi
-    # Respaldo: la primera IPv4 de "hostname -I" que no sea de Docker.
     for ip in $(hostname -I 2>/dev/null); do
         case "${ip}" in *:*|127.*) continue ;; esac
         is_docker_ip "${ip}" && continue
@@ -132,15 +117,14 @@ if [ ! -f .env ]; then
 
     SECRET=$(openssl rand -hex 32 2>/dev/null || head -c32 /dev/urandom | od -An -tx1 | tr -d ' \n')
 
-    # Preferimos IPv4: en hosts con IPv4 e IPv6, "curl ifconfig.me" sin forzar
-    # protocolo suele devolver la IPv6, y esa URL rompe sin corchetes ([::1]).
+    # Primero IPv4: una IPv6 en la URL necesita corchetes.
     PUBLIC_IP=$(curl -fsSL --max-time 3 -4 ifconfig.me 2>/dev/null || true)
     if [ -z "${PUBLIC_IP}" ]; then
         PUBLIC_IP=$(curl -fsSL --max-time 3 -6 ifconfig.me 2>/dev/null || true)
     fi
     case "${PUBLIC_IP}" in
         "") PUBLIC_IP="${LOCAL_IP:-localhost}" ;;
-        *:*) PUBLIC_IP="[${PUBLIC_IP}]" ;;  # IPv6: necesita corchetes en una URL
+        *:*) PUBLIC_IP="[${PUBLIC_IP}]" ;;
     esac
 
     sed -i.bak "s#^PORTAL_SECRET_KEY=.*#PORTAL_SECRET_KEY=${SECRET}#" .env
@@ -148,15 +132,12 @@ if [ ! -f .env ]; then
     sed -i.bak "s#^STACK_ROOT=.*#STACK_ROOT=${INSTALL_DIR}#" .env
     rm -f .env.bak
 else
-    echo "==> Ya existe un .env, lo dejo como está."
-    # Aun así, nos aseguramos de que tenga una PORTAL_SECRET_KEY fuerte: un
-    # .env viejo (o copiado a mano del .env.example) podría traerla con el
-    # placeholder, vacía o sin la línea, y entonces el panel firmaría las
-    # sesiones con una clave conocida (cualquiera podría falsificar un admin).
+    echo "==> Ya existe un .env; se conserva."
+    # Con una clave conocida cualquiera podría falsificar la sesión de un admin.
     CURRENT_SECRET=$(grep '^PORTAL_SECRET_KEY=' .env | cut -d= -f2- || true)
     case "${CURRENT_SECRET}" in
         ""|"cambia-esta-clave"|"portal-docker-dev"|"portal-dev-change-me")
-            echo "==> PORTAL_SECRET_KEY ausente o insegura: genero una nueva."
+            echo "==> PORTAL_SECRET_KEY ausente o insegura: se genera una nueva."
             SECRET=$(openssl rand -hex 32 2>/dev/null || head -c32 /dev/urandom | od -An -tx1 | tr -d ' \n')
             if grep -q '^PORTAL_SECRET_KEY=' .env; then
                 sed -i.bak "s#^PORTAL_SECRET_KEY=.*#PORTAL_SECRET_KEY=${SECRET}#" .env
@@ -168,15 +149,12 @@ else
     esac
 fi
 
-# IP local: se guarda (o actualiza) en el .env por si el panel la necesita.
 grep -q '^LOCAL_HOST=' .env || echo 'LOCAL_HOST=' >> .env
 sed -i.bak "s#^LOCAL_HOST=.*#LOCAL_HOST=${LOCAL_IP}#" .env
 rm -f .env.bak
 
-# Puerto del panel: si el que hay en .env (o el default 5005) está ocupado,
-# busca el próximo libre y lo deja anotado. 80/443 (nginx del proxy) NO se
-# reasignan solos: certificados SSL y muchos servicios esperan esos puertos
-# fijos, así que si están ocupados avisamos y salteamos el proxy.
+# Si el puerto del panel o del SFTP está ocupado se usa el siguiente libre.
+# 80/443 no se cambian: si están ocupados, se omite el proxy.
 CONFIGURED_PORT=$(grep '^PORTAL_PORT=' .env | cut -d= -f2-)
 PORT="${PORTAL_PORT:-${CONFIGURED_PORT:-5005}}"
 if port_in_use "${PORT}"; then
@@ -184,14 +162,11 @@ if port_in_use "${PORT}"; then
     while port_in_use "${PORT}"; do
         PORT=$((PORT + 1))
     done
-    echo "==> El puerto ${ORIGINAL_PORT} está ocupado, uso el ${PORT} en su lugar."
+    echo "==> El puerto ${ORIGINAL_PORT} está ocupado; se usa el ${PORT}."
 fi
 sed -i.bak "s#^PORTAL_PORT=.*#PORTAL_PORT=${PORT}#" .env
 rm -f .env.bak
 
-# Puerto del SFTP (accesos por proyecto): mismo criterio que el del panel.
-# Si el .env es de una instalación anterior a esta funcionalidad, no tiene
-# la línea SFTP_PORT todavía — se agrega antes de intentar reemplazarla.
 grep -q '^SFTP_PORT=' .env || echo 'SFTP_PORT=2222' >> .env
 CONFIGURED_SFTP_PORT=$(grep '^SFTP_PORT=' .env | cut -d= -f2-)
 SFTP_PORT_FINAL="${SFTP_PORT:-${CONFIGURED_SFTP_PORT:-2222}}"
@@ -200,7 +175,7 @@ if port_in_use "${SFTP_PORT_FINAL}"; then
     while port_in_use "${SFTP_PORT_FINAL}"; do
         SFTP_PORT_FINAL=$((SFTP_PORT_FINAL + 1))
     done
-    echo "==> El puerto SFTP ${ORIGINAL_SFTP_PORT} está ocupado, uso el ${SFTP_PORT_FINAL} en su lugar."
+    echo "==> El puerto SFTP ${ORIGINAL_SFTP_PORT} está ocupado; se usa el ${SFTP_PORT_FINAL}."
 fi
 sed -i.bak "s#^SFTP_PORT=.*#SFTP_PORT=${SFTP_PORT_FINAL}#" .env
 rm -f .env.bak
@@ -214,23 +189,20 @@ for p in 80 443; do
     fi
 done
 if [ "${SKIP_PROXY}" = "1" ]; then
-    echo "==> Puerto(s)${BUSY_PORTS} ocupados: salteo el proxy/SSL (nginx + certbot)."
-    echo "    El panel arranca igual. Cuando liberes esos puertos, corré:"
+    echo "==> Puerto(s)${BUSY_PORTS} ocupado(s): se omite el proxy/SSL (nginx + certbot)."
+    echo "    El panel funciona igual. Cuando se liberen, ejecuta:"
     echo "        docker compose up -d --build proxy proxy-certbot"
 fi
 
-echo "==> Levantando contenedores (esto puede tardar un par de minutos la primera vez)..."
+echo "==> Iniciando contenedores (la primera vez puede tardar unos minutos)..."
 if [ "${SKIP_PROXY}" = "1" ]; then
     docker compose up -d --build portal
 else
     docker compose up -d --build
 fi
 
-# Agente de firewall (stackpanel-guard): lleva los bloqueos y las reglas de
-# puertos del panel al kernel (nftables), vigila SSH/SFTP/nginx y cubre los
-# puertos de Docker, que UFW no ve. Necesita root: se instala con sudo.
-# La IP desde la que se instala (sesión SSH) entra a su lista blanca de
-# emergencia, para no quedarse fuera del servidor.
+# Agentes del host (necesitan root). Se reinstalan en cada ejecución para actualizarlos.
+# La IP de la sesión SSH actual entra en la lista blanca de emergencia.
 GUARD_STATUS="no instalado"
 if [ "${STACKPANEL_GUARD:-1}" != "0" ]; then
     ADMIN_IP="${SSH_CLIENT:-}"; ADMIN_IP="${ADMIN_IP%% *}"
@@ -240,41 +212,34 @@ if [ "${STACKPANEL_GUARD:-1}" != "0" ]; then
         SUDO=""
     else
         SUDO="sudo"
-        echo "==> Instalando el agente de firewall (stackpanel-guard): puede pedirte tu contraseña de sudo."
+        echo "==> Instalando los agentes del host: puede pedir la contraseña de sudo."
     fi
-    # Quien instala queda como usuario protegido de stackpanel-sshadm (no se
-    # puede borrar ni quitar de sudo desde el panel).
     PROTECTED_USER="${SSHADM_PROTECTED_USERS:-$(id -un)}"
     [ "${PROTECTED_USER}" = "root" ] && PROTECTED_USER="${SUDO_USER:-}"
     if ${SUDO} env SSHADM_PROTECTED_USERS="${PROTECTED_USER}" STACKPANEL_SSHADM="${STACKPANEL_SSHADM:-1}" \
         bash "${INSTALL_DIR}/guard/install-guard.sh" "${GUARD_ARGS[@]}" >/dev/null; then
         GUARD_STATUS="activo"
-        [ -n "${ADMIN_IP}" ] && GUARD_STATUS="activo (tu IP ${ADMIN_IP} quedó en la lista de emergencia)"
+        [ -n "${ADMIN_IP}" ] && GUARD_STATUS="activo (la IP ${ADMIN_IP} está en la lista de emergencia)"
     else
         GUARD_STATUS="no se pudo instalar"
-        echo "==> No se pudo instalar stackpanel-guard. El panel funciona igual, pero los bloqueos" >&2
-        echo "    y las reglas de puertos no se aplicarán en el servidor hasta que corras:" >&2
+        echo "==> No se pudo instalar stackpanel-guard. El panel funciona, pero los bloqueos" >&2
+        echo "    y las reglas de puertos no se aplicarán hasta ejecutar:" >&2
         echo "        cd ${INSTALL_DIR} && sudo ./guard/install-guard.sh ${GUARD_ARGS[*]}" >&2
     fi
 fi
 
-# Logo de StackPanel al entrar por SSH, justo antes del prompt (después del
-# mensaje de bienvenida del sistema). STACKPANEL_MOTD=0 para
-# no instalarlo.
+# Logo al entrar por SSH, justo antes del prompt.
 if [ "${STACKPANEL_MOTD:-1}" != "0" ] && [ -d /etc/profile.d ]; then
     if [ "$(id -u)" = "0" ]; then MOTD_SUDO=""; else MOTD_SUDO="sudo"; fi
     if ! ${MOTD_SUDO} install -m 0644 "${INSTALL_DIR}/motd/stackpanel-logo.sh" /etc/profile.d/stackpanel-logo.sh; then
-        echo "==> No se pudo instalar el logo en el mensaje de SSH (sigue sin problema)." >&2
+        echo "==> No se pudo instalar el logo de SSH (no afecta al panel)." >&2
     fi
-    # Versiones anteriores lo ponían en update-motd.d (salía arriba de todo).
+    # Ubicación de versiones anteriores.
     if grep -qs 'StackPanel' /etc/update-motd.d/05-stackpanel; then
         ${MOTD_SUDO} rm -f /etc/update-motd.d/05-stackpanel || true
     fi
-    # El mensaje fijo del proveedor del VPS (/etc/motd) se oculta, guardando
-    # una copia exacta que uninstall.sh vuelve a poner. Solo la primera vez:
-    # si ya hay copia no se pisa. STACKPANEL_KEEP_PROVIDER_MOTD=1 para dejarlo.
-    # Si /etc/motd es un enlace (algunas distros lo generan) no se toca, porque
-    # truncate vaciaría el archivo al que apunta.
+    # Oculta el mensaje del proveedor guardando una copia que restaura uninstall.sh.
+    # Si /etc/motd es un enlace no se toca: truncate vaciaría el archivo destino.
     if [ "${STACKPANEL_KEEP_PROVIDER_MOTD:-0}" != "1" ] && [ -s /etc/motd ] \
         && [ ! -L /etc/motd ] && [ ! -e /etc/motd.stackpanel-backup ]; then
         if ${MOTD_SUDO} cp -a /etc/motd /etc/motd.stackpanel-backup; then
@@ -283,8 +248,7 @@ if [ "${STACKPANEL_MOTD:-1}" != "0" ] && [ -d /etc/profile.d ]; then
     fi
 fi
 
-# Antes de decir que todo anda, comprobamos que el panel responda de verdad:
-# el contenedor puede estar "Restarting" en bucle aunque compose haya salido bien.
+# El contenedor puede reiniciarse en bucle aunque compose termine bien.
 echo "==> Esperando a que el panel responda en el puerto ${PORT}..."
 PANEL_OK=0
 for _ in $(seq 1 60); do
@@ -303,7 +267,7 @@ if [ "${PANEL_OK}" != "1" ]; then
         echo
         docker logs --tail 30 stackpanel 2>&1 | sed 's/^/    /'
         echo
-        echo "   Revisá el error de arriba y volvé a correr el instalador, o mirá los logs con:"
+        echo "   Revisa el error anterior y vuelve a ejecutar el instalador, o consulta los logs:"
         echo "       cd ${INSTALL_DIR} && docker compose logs -f portal"
     } >&2
     exit 1
@@ -324,16 +288,14 @@ if [ -n "${LOCAL_IP}" ] && [ -n "${PUBLIC_HOST}" ] && [ "${LOCAL_IP}" != "${PUBL
     URLS="    Red local (desde esta red / esta PC):  http://${LOCAL_IP}:${PORT}/setup
     Pública (desde internet):              http://${PUBLIC_HOST}:${PORT}/setup
 
-Si la instalaste en una PC local, usá la URL de red local. La pública solo anda
-si redirigiste el puerto ${PORT} en tu router (y tu proveedor no usa CGNAT)."
+En un equipo local usa la URL de red local. La pública solo funciona si el puerto
+${PORT} está redirigido en el router (y el proveedor no usa CGNAT)."
     if is_private_ip "${LOCAL_IP}"; then
         URLS="${URLS}
 
-⚠️  Parece una instalación en red local (casa/oficina detrás de un router):
-    la IP ${LOCAL_IP} es privada y distinta de la pública."
+⚠️  Parece una instalación detrás de un router: la IP ${LOCAL_IP} es privada."
     fi
 elif [ -n "${LOCAL_IP}" ] || [ -n "${PUBLIC_HOST}" ]; then
-    # VPS típico (la IP local es la pública) o solo se pudo detectar una.
     URLS="    http://${PUBLIC_HOST:-${LOCAL_IP}}:${PORT}/setup"
 else
     URLS="    http://localhost:${PORT}/setup"
@@ -343,19 +305,22 @@ cat <<MSG
 
 ✅ StackPanel está corriendo en ${INSTALL_DIR}
 
-Abrí en tu navegador:
+Abre en el navegador:
 
 ${URLS}
 
-La primera vez te va a pedir crear el usuario administrador.
+La primera vez se pide crear el usuario administrador.
 
 Firewall del servidor (stackpanel-guard): ${GUARD_STATUS}
     sudo stackpanel-guard status                  # estado del agente
     sudo touch /etc/stackpanel-guard/disabled     # emergencia: quita todos los bloqueos
 
 Comandos útiles (desde ${INSTALL_DIR}):
-    docker compose logs -f portal   # ver logs
-    docker compose down             # apagar
-    docker compose up -d --build    # actualizar/reiniciar
-    ./uninstall.sh                  # desinstalar (deja todo como estaba)
+    docker compose logs -f portal              # ver logs
+    docker compose down                        # apagar
+    docker compose up -d --build portal        # reconstruir el panel
+    sudo ./guard/install-guard.sh              # actualizar los agentes del host
+    ./uninstall.sh                             # desinstalar
+
+Para actualizar a la última versión, vuelve a ejecutar el comando de instalación.
 MSG

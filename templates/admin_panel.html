@@ -4,8 +4,10 @@
 {% block heading %}Resumen{% endblock %}
 {% block content %}
 
-<h2 class="landing-section-title">Monitor del sistema</h2>
-<p class="admin-hint">Uso de CPU y memoria en tiempo real por proyecto (actualización cada 2 s).</p>
+<div class="section-head" style="margin-top:0;">
+	<h2 class="landing-section-title">Monitor en vivo</h2>
+	<a class="btn btn-secondary btn-sm" href="/admin/resources">Ver historial de recursos</a>
+</div>
 
 <section class="htop-panel" id="htop-panel" aria-live="polite">
 	<div class="htop-header">
@@ -57,8 +59,10 @@
 	<p class="htop-error" id="htop-error" hidden></p>
 </section>
 
-<h2 class="landing-section-title">Proyectos Docker</h2>
-<p class="admin-hint">Iniciar o detener el <strong>contenedor completo</strong> de cada proyecto (aplicación + datos). Al detener, la base de datos en disco <strong>no se borra</strong>.</p>
+<div class="section-head">
+	<h2 class="landing-section-title">Proyectos Docker</h2>
+	<a class="btn btn-secondary btn-sm" href="/admin/projects">Gestionar proyectos</a>
+</div>
 
 <div class="admin-services">
 	{% for svc in services %}
@@ -233,8 +237,7 @@
 			errorEl.hidden = false;
 			errorEl.textContent = 'Error al obtener métricas: ' + err.message;
 		} finally {
-			// Se agenda la siguiente vuelta recién cuando esta termina, para no
-			// acumular peticiones si el servidor tarda más que el intervalo.
+			// La siguiente vuelta se agenda al terminar esta, para no acumular peticiones.
 			if (!stopped) { pollTimer = setTimeout(poll, POLL_INTERVAL_MS); }
 		}
 	}

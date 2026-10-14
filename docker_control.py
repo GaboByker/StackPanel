@@ -6,18 +6,12 @@ import struct
 import urllib.error
 import urllib.request
 
-import site_presets
-
 DOCKER_SOCK = os.environ.get('DOCKER_SOCK', '/var/run/docker.sock')
-# Nombres de los contenedores del proxy. El docker-compose.yml del instalador
-# los llama stackpanel-proxy / stackpanel-certbot y los define por entorno.
+# Nombres de los contenedores del proxy; el docker-compose.yml los define por entorno.
 PROXY_CONTAINER = os.environ.get('PROXY_CONTAINER', 'proxy')
 CERTBOT_CONTAINER = os.environ.get('CERTBOT_CONTAINER', 'proxy-certbot')
-# Servicios que el panel gestiona fijos: el proxy (en toda instalación) y,
-# si existe, los propios de este servidor en instance/site_presets.json
-# (ver site_presets.py; el repositorio no lleva datos de ningún servidor).
+# Único servicio fijo: el proxy. Los proyectos salen siempre de la tabla `projects`.
 MANAGED_SERVICES = {
-    **site_presets.get('managed_services', {}),
     'proxy': {
         'containers': [PROXY_CONTAINER, CERTBOT_CONTAINER],
         'label': 'Proxy Nginx (dominios + SSL)',
@@ -172,16 +166,12 @@ def _start_container(container, states=None):
     return False, err
 
 
-# Host desde el que el contenedor del portal puede alcanzar los puertos que
-# otros contenedores publican en el host (vía extra_hosts en docker-compose).
+# Host por el que el panel alcanza los puertos que otros contenedores publican (extra_hosts).
 PROBE_HOST = os.environ.get('DOCKER_HOST_PROBE', 'host.docker.internal')
 
 
 def probe_http_port(host, port, path='/', timeout=1.5):
-    """True si `host:port` responde HTTP. Se usa para adivinar, entre varios
-    puertos publicados por un mismo contenedor, cuál sirve la app (no
-    siempre es el más bajo: p.ej. un contenedor puede publicar 5175 para un
-    dev server y 8080 para el sitio real)."""
+    """True si `host:port` responde HTTP; sirve para elegir el puerto de la app entre varios publicados."""
     url = f'http://{host}:{port}{path}'
     try:
         with urllib.request.urlopen(url, timeout=timeout) as response:
@@ -189,15 +179,12 @@ def probe_http_port(host, port, path='/', timeout=1.5):
     except urllib.error.HTTPError as exc:
         return exc.code < 500
     except (OSError, http.client.HTTPException, ValueError):
-        # No-HTTP (puerto de una base de datos, etc.) manda bytes crudos que
-        # rompen el parser HTTP (BadStatusLine); eso también cuenta como "no
-        # responde HTTP", no como un error que deba tumbar la petición.
+        # Un puerto que no es HTTP (p. ej. una base de datos) rompe el parser; cuenta como "no responde".
         return False
 
 
 def pick_http_port(ports, host=None, path='/'):
-    """De una lista de puertos candidatos, devuelve el primero que responde
-    HTTP contra `host` (por defecto PROBE_HOST). None si ninguno responde."""
+    """Primer puerto de la lista que responde HTTP, o None."""
     for port in ports:
         if probe_http_port(host or PROBE_HOST, port, path):
             return port
@@ -337,9 +324,7 @@ def start_service(service_key):
 
 
 def container_logs(container, tail=200):
-    """Últimas líneas de stdout/stderr de un contenedor (para verlas desde el
-    panel). No usa _docker_request porque esa espera JSON y esto es un
-    stream de texto multiplexado."""
+    """Últimas líneas de logs de un contenedor (stream de texto, no JSON)."""
     if not os.path.exists(DOCKER_SOCK):
         return None, f'No se encuentra el socket de Docker ({DOCKER_SOCK}).'
     conn = _DockerSocketConnection(DOCKER_SOCK)
@@ -372,9 +357,7 @@ def container_logs(container, tail=200):
 
 
 def list_all_containers():
-    """Lista cruda de todos los contenedores (nombre, estado, labels de
-    compose, puertos publicados), usado para detectar proyectos ya
-    corriendo que aún no están registrados en el panel."""
+    """Todos los contenedores (nombre, estado, labels de compose, puertos publicados)."""
     data, err = _docker_request('GET', '/containers/json?all=1')
     if err or data is None:
         return [], err
@@ -394,8 +377,7 @@ def list_all_containers():
 
 
 def list_published_ports():
-    """Puertos publicados al host por contenedores en marcha:
-    [{port, proto, container}]. Para la pantalla de exposición del firewall."""
+    """Puertos publicados al host por contenedores en marcha: [{port, proto, container}]."""
     data, err = _docker_request('GET', '/containers/json')
     if err or data is None:
         return [], err
@@ -414,8 +396,7 @@ def list_published_ports():
 
 
 def containers_status(containers):
-    """Estado simple {running, states} para una lista arbitraria de contenedores
-    (usado por proyectos registrados manualmente, fuera de MANAGED_SERVICES)."""
+    """Estado {running, state, containers} de una lista de contenedores."""
     states, err = _container_states()
     if err or states is None:
         return {'running': False, 'state': 'desconocido', 'error': err}
@@ -497,6 +478,43 @@ def remove_volumes(volumes):
     if errors:
         return False, '; '.join(errors)
     return True, ', '.join(removed) if removed else 'sin volúmenes'
+
+
+def project_leftovers(containers):
+    """Imágenes y redes de compose de los contenedores; se leen ANTES de borrarlos."""
+    images, networks = {}, set()
+    for container in containers:
+        data, err = _docker_request('GET', f'/containers/{container}/json')
+        if err:
+            continue
+        config = data.get('Config') or {}
+        if config.get('Image') and data.get('Image'):
+            images[config['Image']] = data['Image']
+        project = (config.get('Labels') or {}).get('com.docker.compose.project')
+        if project:
+            attached = (data.get('NetworkSettings') or {}).get('Networks') or {}
+            networks.update(n for n in attached if n.startswith(f'{project}_'))
+    return images, networks
+
+
+def remove_leftovers(images, networks):
+    """images: {nombre: id}. Se conserva lo que otro contenedor usa; se compara por id porque Docker quita la etiqueta aunque la imagen esté en uso."""
+    removed = []
+    for network in networks:
+        _, err = _docker_request('DELETE', f'/networks/{network}', timeout=20)
+        if not err:
+            removed.append(network)
+    all_containers, err = _docker_request('GET', '/containers/json?all=1')
+    if err:
+        return removed
+    in_use = {c.get('ImageID') for c in all_containers}
+    for image, image_id in images.items():
+        if image_id in in_use:
+            continue
+        _, err = _docker_request('DELETE', f'/images/{image}', timeout=120)
+        if not err:
+            removed.append(image)
+    return removed
 
 
 def container_to_project_map():

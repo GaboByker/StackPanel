@@ -1,5 +1,4 @@
-"""Explorador y editor básico de archivos, restringido a html/ (los
-proyectos). No da acceso al código del panel ni a nada fuera de esa carpeta."""
+"""Explorador y editor de archivos limitado a html/."""
 import os
 import shutil
 

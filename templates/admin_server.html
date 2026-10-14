@@ -1,0 +1,68 @@
+{% extends "base_admin.html" %}
+{% block title %}Servidor{% endblock %}
+{% block heading %}Servidor{% endblock %}
+{% block content %}
+
+{% set h = metrics.host or {} %}
+<div class="stats-grid stats-grid--text">
+	<div class="stat-tile"><div class="stat-tile-value">{{ uptime }}</div><div class="stat-tile-label">Encendido desde hace</div></div>
+	<div class="stat-tile"><div class="stat-tile-value">{{ load }}</div><div class="stat-tile-label">Carga 1 · 5 · 15 min ({{ cpus }} núcleos)</div></div>
+	<div class="stat-tile"><div class="stat-tile-value">{{ h.memory_used_human or '—' }}</div><div class="stat-tile-label">Memoria de contenedores ({{ '%.0f'|format(h.memory_used_percent or 0) }}%)</div></div>
+	<div class="stat-tile {{ 'accent-danger' if (h.disk_used_percent or 0) >= 90 else '' }}"><div class="stat-tile-value">{{ '%.0f'|format(h.disk_used_percent or 0) }}%</div><div class="stat-tile-label">Disco ({{ h.disk_used_human or '?' }} de {{ h.disk_total_human or '?' }})</div></div>
+</div>
+
+{% set down = services|rejectattr('ok')|list %}
+<div class="section-head" style="margin-top:8px;">
+	<h2 class="landing-section-title">Servicios</h2>
+	{% if down %}<span class="status-pill stopped">{{ down|length }} con problemas</span>{% else %}<span class="status-pill running">Todo en marcha</span>{% endif %}
+</div>
+<div class="admin-table-wrap" style="margin-bottom:24px;">
+	<table class="admin-table svc-table">
+		<thead><tr><th>Servicio</th><th>Estado</th><th>Detalle</th><th><span class="sr-only">Acciones</span></th></tr></thead>
+		<tbody>
+			{% for svc in services %}
+			<tr>
+				<td><strong>{{ svc.label }}</strong></td>
+				<td><span class="status-pill {{ 'running' if svc.ok else 'pending' if svc.ok is none else 'stopped' }}">{{ svc.state }}</span></td>
+				<td style="overflow-wrap:anywhere;"><small>{{ svc.detail }}</small></td>
+				<td style="text-align:right;"><a class="btn btn-secondary btn-sm" href="{{ svc.href }}">Gestionar</a></td>
+			</tr>
+			{% endfor %}
+		</tbody>
+	</table>
+</div>
+<p class="admin-hint">Kernel {{ kernel }} · host {{ public_host }}</p>
+
+<div>
+	<article class="admin-service-card danger-card form-card">
+		<div class="admin-service-head">
+			<h3>Reiniciar el servidor</h3>
+			{% if agent_ok %}<span class="status-pill running">Agente listo</span>{% else %}<span class="status-pill stopped">Agente sin respuesta</span>{% endif %}
+		</div>
+		<p>Todos los sitios, proyectos y SSH quedan fuera de línea 1–3 minutos. Los contenedores con reinicio automático vuelven solos.</p>
+		{% if not agent_ok %}
+		<p class="admin-service-error">El agente <code>stackpanel-sshadm</code> no responde ({{ agent_error }}).</p>
+		{% endif %}
+		<form method="post" action="/admin/server/reboot">
+			<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+			<div class="form-row">
+				<div class="field">
+					<label for="rb-pass">Tu contraseña</label>
+					<input type="password" id="rb-pass" name="password" autocomplete="current-password" required/>
+				</div>
+				{% if totp_enabled %}
+				<div class="field">
+					<label for="rb-code">Código 2FA</label>
+					<input type="text" id="rb-code" name="code" inputmode="numeric" maxlength="6" autocomplete="one-time-code" required/>
+				</div>
+				{% endif %}
+			</div>
+			<div class="admin-actions">
+				<button type="submit" class="btn btn-danger" data-confirm="¿Reiniciar el servidor ahora? Todo quedará fuera de línea unos minutos." {{ '' if agent_ok else 'disabled' }}>Reiniciar servidor</button>
+			</div>
+		</form>
+	</article>
+
+</div>
+
+{% endblock %}

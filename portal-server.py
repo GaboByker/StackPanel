@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Portal inicial: elige entre proyectos independientes en distintos puertos."""
+"""Servidor web de StackPanel (Flask)."""
 import crypt
 import os
 import re
@@ -47,6 +47,7 @@ from auth import (
     verify_totp,
 )
 from docker_control import (
+    _container_states,
     list_service_status,
     start_service,
     stop_service,
@@ -55,6 +56,8 @@ from docker_control import (
     start_containers,
     remove_containers,
     remove_volumes,
+    project_leftovers,
+    remove_leftovers,
     container_logs,
     list_all_containers,
     list_published_ports,
@@ -82,7 +85,6 @@ import resource_charts
 import ssh_access
 import wp_sso
 import sshadm_client
-import site_presets
 import subprocess
 import pyotp
 import segno
@@ -124,18 +126,14 @@ def _is_wordpress(project):
 
 
 def _project_paths(key):
-    """(local_folder, host_folder) para un project_key nuevo: local_folder es
-    donde este proceso puede escribir (montaje r/w html-rw); host_folder es la
-    misma carpeta vista como ruta del host real, la que necesita Docker para
-    los binds de los contenedores que se crean."""
+    """(local_folder, host_folder): ruta con escritura para el panel y la misma ruta vista desde el host, que es la que usa Docker."""
     local_folder = os.path.join(files_control.html_root(STACK_ROOT), key)
     host_folder = os.path.join(HOST_STACK_ROOT, 'html', key)
     return local_folder, host_folder
 
 
 def _ensure_project_folder(project):
-    """Crea html/<key> si el proyecto todavía no tiene carpeta propia y la
-    registra en la base de datos. Devuelve el project (dict) actualizado."""
+    """Crea html/<key> si el proyecto aún no tiene carpeta y la registra."""
     if project.get('folder'):
         return project
     folder = f"html/{project['project_key']}"
@@ -151,9 +149,11 @@ def _ensure_project_folder(project):
     project['folder'] = folder
     return project
 
-# Grafos de código disponibles: el del propio panel y los de los proyectos
-# de esta instalación (site_presets.py).
-GRAPHIFY_PROJECTS = {'portal': 'portal', **site_presets.get('graphify_projects', {})}
+def _graphify_projects():
+    """Grafos posibles: el del panel y el de cada proyecto registrado."""
+    projects = {p['project_key']: p['folder'] for p in panel_db.list_projects_raw(PORTAL_ROOT) if p.get('folder')}
+    return {'portal': 'portal', **projects}
+
 _GRAPHIFY_FILES = frozenset({
     'graph.html',
     'graph.json',
@@ -169,8 +169,7 @@ app = Flask(
     static_folder=os.path.join(PORTAL_ROOT, 'static'),
 )
 app.config['SECRET_KEY'] = os.environ.get('PORTAL_SECRET_KEY', 'portal-dev-change-me')
-# Techo del cookie; la vida real de la sesión (horas máximas e inactividad)
-# la decide security.get_rules() en _validate_admin_session.
+# Límite de la cookie; la duración real de la sesión la decide security.get_rules().
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=7)
 app.config['SESSION_REFRESH_EACH_REQUEST'] = False
 app.config['SESSION_COOKIE_HTTPONLY'] = True
@@ -191,9 +190,8 @@ scheduler.start(PORTAL_ROOT, STACK_ROOT, BACKUPS_DIR)
 
 @app.errorhandler(CSRFError)
 def handle_csrf_error(e):
-    flash('El formulario expiró por inactividad. Volvé a intentar la acción.', 'error')
-    # Se vuelve solo a la ruta relativa del referrer y únicamente si es del
-    # mismo host, para no reenviar a un dominio externo (open redirect).
+    flash('El formulario expiró por inactividad. Vuelve a intentar la acción.', 'error')
+    # Solo rutas relativas del mismo host, para evitar redirecciones abiertas.
     ref = urlparse(request.referrer or '')
     if ref.netloc == urlparse(request.host_url).netloc and ref.path:
         back = ref.path + (f'?{ref.query}' if ref.query else '')
@@ -268,9 +266,7 @@ def load_projects():
 
 
 def _autolink_containers(projects):
-    """Si un proyecto se registró antes de que existieran sus contenedores
-    (p.ej. se importó la carpeta y luego se hizo el build), quedaba sin
-    contenedores y no aparecía en el Resumen. Los buscamos y los guardamos."""
+    """Asocia contenedores a los proyectos que se registraron antes de construirlos."""
     pending = [p for p in projects if not p['containers'] and (p['folder'] or '').startswith('html/')]
     if not pending:
         return
@@ -293,8 +289,7 @@ def _autolink_containers(projects):
 
 
 def _donut_segments(categories):
-    """Arma los segmentos de un donut SVG (técnica stroke-dasharray sobre circunferencia=100).
-    categories: lista de (label, value, color)."""
+    """Segmentos de un donut SVG; categories es una lista de (label, value, color)."""
     total = sum(value for _, value, _ in categories)
     segments = []
     cumulative = 0.0
@@ -329,7 +324,7 @@ def _require_admin():
 def list_graphify_graphs():
     by_id = {p['id']: p for p in load_projects()}
     graphs = []
-    for project_id, folder in GRAPHIFY_PROJECTS.items():
+    for project_id, folder in _graphify_projects().items():
         graph_html = os.path.join(STACK_ROOT, folder, 'graphify-out', 'graph.html')
         if not os.path.isfile(graph_html):
             continue
@@ -350,7 +345,7 @@ def list_graphify_graphs():
 
 
 def _graphify_out_dir(project_id):
-    folder = GRAPHIFY_PROJECTS.get(project_id)
+    folder = _graphify_projects().get(project_id)
     if not folder:
         return None
     out_dir = os.path.join(STACK_ROOT, folder, 'graphify-out')
@@ -362,7 +357,8 @@ def _graphify_out_dir(project_id):
 @app.context_processor
 def inject_admin():
     admin = get_admin(PORTAL_ROOT) if get_admin_id() else None
-    return {'current_admin': admin}
+    unseen = panel_db.unseen_notifications(PORTAL_ROOT) if admin else 0
+    return {'current_admin': admin, 'unseen_notifications': unseen}
 
 
 @app.before_request
@@ -382,8 +378,7 @@ _TWO_FA_EXEMPT = ('/admin/2fa', '/admin/logout', '/static/')
 
 @app.before_request
 def _validate_admin_session():
-    """Cierra la sesión si fue revocada, superó su vida máxima o lleva
-    demasiado tiempo inactiva; y obliga a configurar 2FA si es requisito."""
+    """Cierra la sesión revocada, caducada o inactiva y exige 2FA si es obligatorio."""
     admin_id = get_admin_id()
     if not admin_id:
         return None
@@ -402,8 +397,7 @@ def _validate_admin_session():
             flash('Tu sesión expiró. Vuelve a iniciar sesión.', 'error')
             return redirect(url_for('admin_login', next=request.path))
         return None
-    # Se renueva como mucho una vez por minuto para no reescribir la cookie
-    # en cada petición (las métricas se consultan cada pocos segundos).
+    # Se renueva como máximo una vez por minuto para no reescribir la cookie en cada petición.
     if now - int(session.get('seen_at', 0)) >= 60:
         session['seen_at'] = now
     if rules['sec_require_2fa'] and not request.path.startswith(_TWO_FA_EXEMPT):
@@ -485,15 +479,13 @@ def admin_login():
         email = request.form.get('email', '')
         ua = request.headers.get('User-Agent', '')
         if security.account_locked(PORTAL_ROOT, email.strip().lower(), ip):
-            # Mismo mensaje que un fallo normal: no se le confirma al atacante
-            # que la cuenta existe ni que está protegida.
+            # Mismo mensaje que un fallo normal, para no revelar que la cuenta existe.
             security.record_attempt(PORTAL_ROOT, ip, 'login', email, False, ua)
             error = 'Correo o contraseña incorrectos.'
         else:
             admin, error = authenticate(PORTAL_ROOT, email, request.form.get('password', ''))
             if admin and admin.get('totp_enabled'):
-                # La contraseña sola no cuenta como acceso: el éxito se
-                # registra cuando también pasa el segundo paso.
+                # El acceso se registra cuando también pasa el segundo paso.
                 session.clear()
                 session['pending_admin_id'] = admin['id']
                 session['pending_at'] = int(datetime.now(timezone.utc).timestamp())
@@ -576,7 +568,7 @@ def admin_panel():
         if not project['containers']:
             continue
         if managed_containers.intersection(project['containers']):
-            # Ya está cubierto por un servicio fijo (arriba); evita la tarjeta duplicada.
+            # Ya lo muestra un servicio fijo; evita la tarjeta duplicada.
             continue
         project['docker_status'] = containers_status(project['containers'])
         docker_projects.append(project)
@@ -789,8 +781,7 @@ def admin_project_sftp_create(project_id):
     project = panel_db.get_project(PORTAL_ROOT, project_id)
     if not project:
         abort(404)
-    # Proyectos antiguos que quedaron "solo enlace" (sin carpeta propia)
-    # todavía pueden no tener carpeta; se crea aquí también por si acaso.
+    # Los proyectos antiguos de solo enlace pueden no tener carpeta.
     project = _ensure_project_folder(project)
 
     username = (request.form.get('username') or '').strip().lower()
@@ -1420,8 +1411,7 @@ def admin_project_install(template_key):
 
     wp_warning = None
     if template_key == 'wordpress':
-        # Deja el WordPress instalado (título, admin, idioma) para poder entrar
-        # directo desde el panel sin pasar por el asistente.
+        # Completa la instalación para entrar desde el panel sin pasar por el asistente.
         wp_sso.ensure(local_folder)
         wp_user = f'{key}-admin'
         wp_password, wp_warning = wp_sso.complete_install(
@@ -1478,7 +1468,7 @@ def admin_project_from_git():
         role = (roles[i] if i < len(roles) else '').strip() or f'repo{len(repos) + 1}'
         role = re.sub(r'[^a-z0-9-]+', '-', role.lower()).strip('-') or f'repo{len(repos) + 1}'
         if role in seen_roles:
-            flash(f'El rol "{role}" está repetido; usá nombres distintos para cada repositorio.', 'error')
+            flash(f'El rol "{role}" está repetido; usa nombres distintos para cada repositorio.', 'error')
             return redirect(url_for('admin_project_from_git'))
         seen_roles.add(role)
         port_raw = (ports[i] if i < len(ports) else '').strip()
@@ -1492,7 +1482,7 @@ def admin_project_from_git():
         })
 
     if not repos:
-        flash('Agregá al menos un repositorio con su URL.', 'error')
+        flash('Agrega al menos un repositorio con su URL.', 'error')
         return redirect(url_for('admin_project_from_git'))
     if public_index >= len(repos):
         public_index = 0
@@ -1613,8 +1603,7 @@ def admin_files(subpath):
 
 
 def _project_owning_subpath(subpath):
-    """Encuentra el proyecto cuya carpeta (html/<folder>) contiene subpath,
-    para saber qué contenedores detener antes de borrar un archivo suyo."""
+    """Proyecto cuya carpeta contiene subpath."""
     subpath = (subpath or '').strip('/')
     for project in panel_db.list_projects_raw(PORTAL_ROOT):
         folder = project.get('folder') or ''
@@ -1629,8 +1618,7 @@ def _project_owning_subpath(subpath):
 
 
 def _stop_project_if_running(subpath):
-    """Si subpath pertenece a un proyecto con contenedores en marcha, los
-    detiene antes de una operación destructiva sobre sus archivos."""
+    """Detiene los contenedores del proyecto dueño de subpath antes de una operación destructiva."""
     project = _project_owning_subpath(subpath)
     if not project:
         return True, None
@@ -1689,6 +1677,7 @@ def admin_project_wipe(project_id):
     containers = panel_db.project_containers(project)
     volumes = panel_db.project_volumes(project)
     folder = project.get('folder') or ''
+    images, networks = project_leftovers(containers)
 
     if containers:
         ok, msg = remove_containers(containers)
@@ -1705,6 +1694,8 @@ def admin_project_wipe(project_id):
             )
             return redirect(url_for('admin_project_detail', project_id=project_id))
 
+    remove_leftovers(images, networks)
+
     if folder.startswith('html/'):
         folder_rel = folder[5:].strip('/')
         if folder_rel:
@@ -1715,7 +1706,7 @@ def admin_project_wipe(project_id):
 
     panel_db.delete_project(PORTAL_ROOT, project_id)
     panel_db.log_action(PORTAL_ROOT, current_admin_email(), 'project_wipe', project['name'])
-    flash(f'"{project["name"]}" eliminado por completo: contenedores, volúmenes y archivos.', 'success')
+    flash(f'"{project["name"]}" eliminado por completo: contenedores, volúmenes, imágenes, redes y archivos.', 'success')
     return redirect(url_for('admin_projects'))
 
 
@@ -1841,8 +1832,7 @@ def admin_security():
         PORTAL_ROOT, service=service, result=result if result in ('ok', 'fail') else '',
         **_table_args('e', 'ts'),
     )
-    # Estado de las tres tablas en la URL: cada enlace de orden/página cambia
-    # solo lo suyo y conserva el resto.
+    # El estado de las tres tablas va en la URL para que cada enlace conserve el resto.
     table_params = {'service': service, 'eres': events['result']}
     for prefix, t, default_sort in (('b', bans, 'created_at'), ('h', history, 'created_at'), ('e', events, 'ts')):
         table_params.update({
@@ -1928,8 +1918,7 @@ def admin_security_rules():
 
 
 def _security_back(default_anchor):
-    """Vuelve a la misma búsqueda/página de la tabla desde la que se actuó.
-    Solo se aceptan rutas de esta misma página (nada de redirecciones abiertas)."""
+    """Vuelve a la misma búsqueda y página; solo acepta rutas de esta página."""
     back = request.form.get('back', '')
     if not back.startswith('/admin/security') or '//' in back or '\\' in back:
         return url_for('admin_security') + '#' + default_anchor
@@ -2086,8 +2075,7 @@ def _ssh_unlocked_left():
 
 
 def _ssh_require_unlock(back):
-    """Las acciones sobre cuentas y sshd piden la contraseña del panel (y 2FA)
-    de nuevo: una sesión robada no alcanza para crear un usuario con sudo."""
+    """Las acciones sobre cuentas y sshd piden otra vez contraseña y 2FA: una sesión robada no basta."""
     if _ssh_unlocked_left():
         return None
     flash(f'Por seguridad, confirma tu identidad para gestionar SSH (vale {SSH_UNLOCK_MINUTES} minutos).', 'error')
@@ -2277,6 +2265,11 @@ def admin_ssh_config_action(action):
     if action == 'apply':
         settings = {k: request.form.get(k, '') for k in _SSHD_FIELDS}
         return _ssh_run('sshd_propose', back, 'sshd_proposed', settings=settings)[0]
+    if action == 'ports':
+        ports = request.form.getlist('port') + request.form.get('new_port', '').replace(',', ' ').split()
+        return _ssh_run('sshd_ports', back, 'sshd_ports_proposed', ports=ports)[0]
+    if action == 'restart':
+        return _ssh_run('sshd_restart', back, 'sshd_restarted')[0]
     if action == 'confirm':
         status, error = sshadm_client.status()
         pending = (status or {}).get('pending')
@@ -2412,7 +2405,7 @@ def admin_graphify_project(project_id):
     gate = _require_admin()
     if gate:
         return gate
-    if project_id not in GRAPHIFY_PROJECTS:
+    if project_id not in _graphify_projects():
         abort(404)
     return redirect(
         url_for('admin_graphify_file', project_id=project_id, filename='graph.html')
@@ -2497,8 +2490,7 @@ def admin_2fa():
     otpauth_uri = pyotp.totp.TOTP(secret).provisioning_uri(
         name=admin['email'] if admin else '', issuer_name='Panel'
     ) if secret else None
-    # El QR se genera aquí mismo (SVG en línea): la clave secreta nunca sale
-    # hacia un servicio externo de códigos QR.
+    # El QR se genera aquí para que la clave secreta no salga a un servicio externo.
     qr_svg = segno.make(otpauth_uri, error='m').svg_inline(
         scale=5, border=4, dark='#000000', light='#ffffff',
     ) if otpauth_uri and not enabled else None
@@ -2531,8 +2523,27 @@ def admin_notifications():
         notification_control.save_config(PORTAL_ROOT, request.form)
         panel_db.log_action(PORTAL_ROOT, current_admin_email(), 'notifications_saved', '')
         flash('Configuración de notificaciones guardada.', 'success')
-        return redirect(url_for('admin_notifications'))
-    return render_template('admin_notifications.html', cfg=notification_control.get_config(PORTAL_ROOT))
+        return redirect(url_for('admin_notifications') + '#canales')
+    try:
+        page = max(1, int(request.args.get('page', 1)))
+    except ValueError:
+        page = 1
+    per = 20
+    items, total = panel_db.list_notifications(PORTAL_ROOT, limit=per, offset=(page - 1) * per)
+    panel_db.mark_notifications_seen(PORTAL_ROOT)
+    return _no_cache(make_response(render_template(
+        'admin_notifications.html', cfg=notification_control.get_config(PORTAL_ROOT),
+        items=items, total=total, page=page, pages=max(1, -(-total // per)),
+        unseen_notifications=0,
+    )))
+
+
+@app.route('/admin/api/notifications')
+def admin_notifications_api():
+    if not get_admin_id():
+        return {'error': 'No autorizado'}, 401
+    items, _ = panel_db.list_notifications(PORTAL_ROOT, limit=8)
+    return jsonify({'unseen': panel_db.unseen_notifications(PORTAL_ROOT), 'items': items})
 
 
 @app.route('/admin/notifications/test', methods=['POST'])
@@ -2548,7 +2559,109 @@ def admin_notifications_test():
     else:
         summary = '; '.join(f"{name}: {'ok' if ok else err}" for name, ok, err in results)
         flash(f'Prueba enviada — {summary}', 'success')
-    return redirect(url_for('admin_notifications'))
+    return redirect(url_for('admin_notifications') + '#canales')
+
+
+@app.route('/admin/server')
+def admin_server():
+    gate = _require_admin()
+    if gate:
+        return gate
+    agent, agent_error = sshadm_client.status(timeout=5)
+    guard, guard_error = guard_client.status()
+    states, docker_err = _container_states()
+    services = []
+    if agent:
+        units = agent.get('units') or {}
+        up = any(v == 'active' for v in units.values()) and agent.get('listening')
+        services.append({
+            'label': 'SSH', 'ok': bool(up), 'state': 'En marcha' if up else 'Apagado',
+            'detail': 'Puertos ' + ', '.join(agent['listening']) if agent.get('listening') else 'No escucha en ningún puerto',
+            'href': '/admin/ssh/config',
+        })
+    else:
+        services.append({'label': 'SSH', 'ok': None, 'state': 'Sin datos', 'detail': 'El agente sshadm no responde', 'href': '/admin/ssh/config'})
+    for svc in list_service_status():
+        services.append({
+            'label': svc['label'], 'ok': svc['running'], 'state': 'En marcha' if svc['running'] else svc['state'],
+            'detail': ', '.join(f"{c['name']}: {c['state']}" for c in svc['container_states']) or svc['error'] or '—',
+            'href': '/admin/proxy' if svc['key'] == 'proxy' else '/admin',
+        })
+    for project in load_projects():
+        if not project['containers']:
+            continue
+        st = containers_status(project['containers'])
+        services.append({
+            'label': project['name'], 'ok': st['running'], 'state': 'En marcha' if st['running'] else st['state'],
+            'detail': ', '.join(f"{c['name']}: {c['state']}" for c in st.get('containers', [])) or st['error'] or '—',
+            'href': url_for('admin_project_detail', project_id=project['db_id']),
+        })
+    if guard:
+        fw_ok = guard.get('table_present') and not guard.get('disabled') and not guard.get('last_error')
+        k = guard.get('kernel') or {}
+        services.append({
+            'label': 'Firewall (stackpanel-guard)', 'ok': bool(fw_ok),
+            'state': 'Activo' if fw_ok else ('Desactivado' if guard.get('disabled') else 'Con errores'),
+            'detail': guard.get('last_error') or f"{(k.get('ban4') or 0) + (k.get('ban6') or 0)} IPs bloqueadas en el kernel",
+            'href': '/admin/firewall',
+        })
+    else:
+        services.append({'label': 'Firewall (stackpanel-guard)', 'ok': False, 'state': 'Sin respuesta', 'detail': guard_error, 'href': '/admin/firewall'})
+    services.append({
+        'label': 'Agente de administración (sshadm)', 'ok': bool(agent), 'state': 'Activo' if agent else 'Sin respuesta',
+        'detail': f"versión {agent.get('version')}" if agent else agent_error, 'href': '/admin/ssh/users',
+    })
+    if states is not None:
+        running = sum(1 for v in states.values() if v == 'running')
+        services.append({'label': 'Docker', 'ok': True, 'state': 'En marcha', 'detail': f'{running} de {len(states)} contenedores corriendo', 'href': '/admin/projects'})
+    else:
+        services.append({'label': 'Docker', 'ok': False, 'state': 'Sin respuesta', 'detail': docker_err, 'href': '/admin/projects'})
+    try:
+        with open('/proc/loadavg') as fh:
+            load = ' · '.join(fh.read().split()[:3])
+        with open('/proc/sys/kernel/osrelease') as fh:
+            kernel = fh.read().strip()
+    except OSError:
+        load, kernel = '—', '—'
+    try:
+        # El contenedor comparte el kernel del host: /proc/uptime es el del servidor.
+        with open('/proc/uptime') as fh:
+            secs = int(float(fh.read().split()[0]))
+        days, hours, mins = secs // 86400, secs % 86400 // 3600, secs % 3600 // 60
+        uptime = f'{days} d {hours} h' if days else f'{hours} h {mins} min'
+    except (OSError, ValueError):
+        uptime = '—'
+    return _no_cache(make_response(render_template(
+        'admin_server.html', metrics=get_system_metrics(), agent_ok=bool(agent), agent_error=agent_error,
+        uptime=uptime, services=services, load=load, kernel=kernel, cpus=os.cpu_count(),
+        totp_enabled=get_totp_state(PORTAL_ROOT, get_admin_id())[1], public_host=get_public_host(),
+    )))
+
+
+@app.route('/admin/server/reboot', methods=['POST'])
+def admin_server_reboot():
+    gate = _require_admin()
+    if gate:
+        return gate
+    # Reiniciar deja todo fuera de línea: se pide otra vez contraseña y 2FA.
+    email = current_admin_email()
+    admin, _ = authenticate(PORTAL_ROOT, email, request.form.get('password', ''))
+    ok = bool(admin) and admin['id'] == get_admin_id()
+    if ok and admin['totp_enabled']:
+        ok = verify_totp(PORTAL_ROOT, admin['id'], request.form.get('code', ''))
+    security.record_attempt(PORTAL_ROOT, g.client_ip, 'reauth', email, ok, request.headers.get('User-Agent', ''))
+    if not ok:
+        flash('Contraseña o código incorrectos. El servidor no se reinició.', 'error')
+        return redirect(url_for('admin_server'))
+    done, message = sshadm_client.run('server_reboot', timeout=20)
+    if done:
+        panel_db.log_action(PORTAL_ROOT, email, 'server_reboot', g.client_ip)
+        flash(message + '. El panel volverá a responder en 1–3 minutos.', 'success')
+    elif 'desconocida' in message:
+        flash('El agente del servidor está desactualizado. Ejecuta por SSH: sudo ./guard/install-guard.sh', 'error')
+    else:
+        flash(message, 'error')
+    return redirect(url_for('admin_server'))
 
 
 @app.route('/admin/backups')
@@ -2628,8 +2741,7 @@ def admin_change_password():
             request.form.get('new_password', ''),
         )
         if ok:
-            # change_password ya invalidó todas las sesiones de este admin;
-            # se renueva solo la actual para no echarlo a él también.
+            # change_password invalidó todas las sesiones; se renueva solo la actual.
             login_admin({'id': get_admin_id()}, PORTAL_ROOT)
             panel_db.log_action(PORTAL_ROOT, current_admin_email(), 'password_changed', g.client_ip)
             flash('Contraseña actualizada. Se cerraron tus otras sesiones abiertas.', 'success')

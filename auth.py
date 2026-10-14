@@ -12,11 +12,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 EMAIL_RE = re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
 MIN_PASSWORD_LEN = 8
 
-# Sin valor por defecto: si no defines PORTAL_BOOTSTRAP_EMAIL, no se crea
-# ningún admin automático — en su lugar, el primer acceso al panel muestra
-# el asistente de primera configuración (/setup) para crear la cuenta ahí.
-# PORTAL_BOOTSTRAP_EMAIL solo existe para instalaciones automatizadas que
-# quieran saltarse el asistente definiendo el admin por variables de entorno.
+# Sin valor por defecto: si falta, el primer acceso abre el asistente /setup para crear el admin.
 BOOTSTRAP_EMAIL = os.environ.get('PORTAL_BOOTSTRAP_EMAIL')
 BOOTSTRAP_PASSWORD = os.environ.get('PORTAL_BOOTSTRAP_PASSWORD')
 
@@ -97,12 +93,11 @@ def get_admin(root):
     if not aid:
         return None
     with _connect(root) as conn:
-        row = conn.execute('SELECT id, email, created_at FROM admins WHERE id = ?', (aid,)).fetchone()
+        row = conn.execute('SELECT id, email, created_at, totp_enabled FROM admins WHERE id = ?', (aid,)).fetchone()
     return dict(row) if row else None
 
 
-# Hash de relleno: si el correo no existe se verifica igual contra esto, para
-# que el tiempo de respuesta no delate qué correos son de administradores.
+# Si el correo no existe se verifica contra este hash, para que el tiempo de respuesta no lo delate.
 _DUMMY_HASH = generate_password_hash(secrets.token_urlsafe(16))
 
 
@@ -135,8 +130,7 @@ def set_totp_secret(root, admin_id, secret):
 
 
 def verify_totp(root, admin_id, code):
-    """Valida un código TOTP (±30 s) y lo marca como usado: el mismo código
-    no sirve dos veces aunque siga dentro de su ventana."""
+    """Valida un código TOTP (±30 s) y lo marca como usado para que no sirva dos veces."""
     code = (code or '').strip()
     if not code.isdigit() or len(code) != 6:
         return False

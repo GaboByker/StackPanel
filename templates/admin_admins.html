@@ -2,14 +2,9 @@
 {% block title %}Administradores{% endblock %}
 {% block heading %}Administradores{% endblock %}
 {% block topbar_actions %}
-<a class="btn btn-secondary btn-sm" href="/admin/password">Cambiar mi contraseña</a>
-<a class="btn btn-secondary btn-sm" href="/admin/2fa">Verificación en dos pasos</a>
-<a class="btn btn-secondary btn-sm" href="/admin/audit">Auditoría</a>
 <a class="btn btn-primary btn-sm" href="/admin/admins/new">+ Crear administrador</a>
 {% endblock %}
 {% block content %}
-
-<p class="admin-hint">Solo un administrador ya autenticado puede crear otros. No hay auto-registro.</p>
 
 <div class="admin-table-wrap">
 	<table class="admin-table">

@@ -1,4 +1,4 @@
-{% from '_icons.html' import icon_dashboard, icon_stack, icon_folder, icon_globe, icon_shield, icon_archive, icon_cpu, icon_bell, icon_share, icon_users, icon_terminal, icon_arrow_up_right %}
+{% from '_icons.html' import icon_dashboard, icon_stack, icon_folder, icon_globe, icon_shield, icon_archive, icon_cpu, icon_bell, icon_share, icon_users, icon_terminal, icon_arrow_up_right, icon_cog, icon_document, icon_bolt %}
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -26,19 +26,30 @@
 					<span></span><span></span><span></span>
 				</button>
 			</div>
+			{% set path = request.path %}
+			{% macro nav_link(href, label, ic, prefix=None) -%}
+			{%- set p = prefix or href -%}
+			<a href="{{ href }}" class="{{ 'active' if (path == p if p == '/admin' else path.startswith(p)) else '' }}"{% if (path == p if p == '/admin' else path.startswith(p)) %} aria-current="page"{% endif %}>{{ ic }}<span>{{ label }}</span></a>
+			{%- endmacro %}
 			<nav class="admin-nav" aria-label="Navegación de administración">
-				<a href="/admin" class="{{ 'active' if request.path == '/admin' else '' }}">{{ icon_dashboard() }}<span>Resumen</span></a>
-				<a href="/admin/projects" class="{{ 'active' if request.path.startswith('/admin/projects') else '' }}">{{ icon_stack() }}<span>Proyectos</span></a>
-				<a href="/admin/files/" class="{{ 'active' if request.path.startswith('/admin/files') else '' }}">{{ icon_folder() }}<span>Archivos</span></a>
-				<a href="/admin/proxy" class="{{ 'active' if request.path.startswith('/admin/proxy') else '' }}">{{ icon_globe() }}<span>Proxy &amp; SSL</span></a>
-				<a href="/admin/security" class="{{ 'active' if request.path.startswith('/admin/security') else '' }}">{{ icon_shield() }}<span>Seguridad</span></a>
-				<a href="/admin/firewall" class="{{ 'active' if request.path.startswith('/admin/firewall') else '' }}">{{ icon_shield() }}<span>Firewall</span></a>
-				<a href="/admin/ssh" class="{{ 'active' if request.path.startswith('/admin/ssh') else '' }}">{{ icon_terminal() }}<span>Accesos SSH</span></a>
-				<a href="/admin/backups" class="{{ 'active' if request.path.startswith('/admin/backups') else '' }}">{{ icon_archive() }}<span>Backups</span></a>
-				<a href="/admin/resources" class="{{ 'active' if request.path.startswith('/admin/resources') else '' }}">{{ icon_cpu() }}<span>Recursos</span></a>
-				<a href="/admin/notifications" class="{{ 'active' if request.path.startswith('/admin/notifications') else '' }}">{{ icon_bell() }}<span>Notificaciones</span></a>
-				<a href="/admin/graphify" class="{{ 'active' if request.path.startswith('/admin/graphify') else '' }}">{{ icon_share() }}<span>Grafos</span></a>
-				<a href="/admin/admins" class="{{ 'active' if request.path.startswith('/admin/admins') else '' }}">{{ icon_users() }}<span>Administradores</span></a>
+				<div class="admin-nav-group">General</div>
+				{{ nav_link('/admin', 'Resumen', icon_dashboard()) }}
+				{{ nav_link('/admin/resources', 'Recursos', icon_cpu()) }}
+				{{ nav_link('/admin/notifications', 'Notificaciones', icon_bell()) }}
+				<div class="admin-nav-group">Sitios y apps</div>
+				{{ nav_link('/admin/projects', 'Proyectos', icon_stack()) }}
+				{{ nav_link('/admin/proxy', 'Dominios y SSL', icon_globe()) }}
+				{{ nav_link('/admin/files/', 'Archivos', icon_folder(), '/admin/files') }}
+				{{ nav_link('/admin/backups', 'Backups', icon_archive()) }}
+				{{ nav_link('/admin/graphify', 'Grafos', icon_share()) }}
+				<div class="admin-nav-group">Seguridad</div>
+				{{ nav_link('/admin/security', 'Protección', icon_shield()) }}
+				{{ nav_link('/admin/firewall', 'Firewall', icon_bolt()) }}
+				{{ nav_link('/admin/ssh', 'Accesos SSH', icon_terminal()) }}
+				{{ nav_link('/admin/audit', 'Auditoría', icon_document()) }}
+				<div class="admin-nav-group">Sistema</div>
+				{{ nav_link('/admin/server', 'Servidor', icon_cog()) }}
+				{{ nav_link('/admin/admins', 'Administradores', icon_users()) }}
 			</nav>
 			<div class="admin-sidebar-footer">
 				<label class="theme-switch" for="theme-toggle-input">
@@ -49,7 +60,13 @@
 					</span>
 				</label>
 				<a href="/" target="_blank" rel="noopener" class="admin-sidebar-link">{{ icon_arrow_up_right(cls='icon icon-sm') }} Ver portal</a>
-				<div class="admin-user" title="{{ current_admin.email }}">{{ current_admin.email }}</div>
+				<details class="admin-account">
+					<summary class="admin-user" title="{{ current_admin.email }}">{{ current_admin.email }}</summary>
+					<div class="admin-account-menu">
+						<a href="/admin/password">Cambiar mi contraseña</a>
+						<a href="/admin/2fa">Verificación en dos pasos {% if current_admin.totp_enabled %}<span class="status-pill running">Activa</span>{% else %}<span class="status-pill pending">Inactiva</span>{% endif %}</a>
+					</div>
+				</details>
 				<form method="post" action="/admin/logout" class="logout-form">
 					<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
 					<button type="submit" class="admin-sidebar-logout">Cerrar sesión</button>
@@ -60,7 +77,20 @@
 		<div class="admin-main">
 			<header class="admin-topbar">
 				<span class="admin-topbar-title">{% block heading %}{% endblock %}</span>
-				{% block topbar_actions %}{% endblock %}
+				<div class="admin-topbar-actions">
+					{% block topbar_actions %}{% endblock %}
+					<details class="notif-bell" id="notif-bell">
+						<summary aria-label="Notificaciones">
+							{{ icon_bell() }}
+							<span class="notif-count" id="notif-count" {% if not unseen_notifications %}hidden{% endif %}>{{ unseen_notifications }}</span>
+							<span class="sr-only" role="status" aria-atomic="true" id="notif-status">{{ unseen_notifications }} notificaciones sin leer</span>
+						</summary>
+						<div class="notif-menu">
+							<div class="notif-menu-head"><strong>Notificaciones</strong><a href="/admin/notifications">Ver todas</a></div>
+							<ul class="notif-list" id="notif-list"><li class="notif-empty">Cargando…</li></ul>
+						</div>
+					</details>
+				</div>
 			</header>
 			<main class="admin-content">
 				{% with messages = get_flashed_messages(with_categories=true) %}
@@ -81,6 +111,63 @@
 		</div>
 	</div>
 	{% block scripts %}{% endblock %}
+	<script>
+		// Campana: el contador se refresca solo; la lista se carga al abrirla.
+		(function () {
+			var bell = document.getElementById('notif-bell');
+			var count = document.getElementById('notif-count');
+			var status = document.getElementById('notif-status');
+			var list = document.getElementById('notif-list');
+			function esc(t) { var d = document.createElement('div'); d.textContent = t == null ? '' : String(t); return d.innerHTML; }
+			function load() {
+				fetch('/admin/api/notifications', { credentials: 'same-origin' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (data) {
+					if (!data) { return; }
+					count.hidden = !data.unseen;
+					count.textContent = data.unseen > 99 ? '99+' : data.unseen;
+					status.textContent = data.unseen + ' notificaciones sin leer';
+					list.innerHTML = data.items.length ? data.items.map(function (n) {
+						return '<li class="' + (n.seen ? '' : 'is-new') + '"><strong>' + esc(n.title) + '</strong><span>' + esc(n.message) + '</span><time>' + esc(n.ts.slice(0, 16).replace('T', ' ')) + ' UTC</time></li>';
+					}).join('') : '<li class="notif-empty">Sin notificaciones todavía.</li>';
+				}).catch(function () {});
+			}
+			bell.addEventListener('toggle', function () { if (bell.open) { load(); } });
+			document.addEventListener('click', function (e) {
+				document.querySelectorAll('details.notif-bell[open], details.menu-btn[open]').forEach(function (d) {
+					if (!d.contains(e.target)) { d.open = false; }
+				});
+			});
+			setInterval(function () { if (!document.hidden) { load(); } }, 30000);
+		})();
+
+		// Pestañas: <nav class="page-tabs"> + <section class="tab-panel">; un #ancla interno abre su pestaña.
+		(function () {
+			var tabs = document.querySelectorAll('.page-tabs a');
+			if (!tabs.length) { return; }
+			var panels = document.querySelectorAll('.tab-panel');
+			function show(hash) {
+				var target = hash && document.getElementById(hash.slice(1));
+				var panel = target && target.closest('.tab-panel');
+				if (!panel) { panel = panels[0]; }
+				panels.forEach(function (p) { p.hidden = p !== panel; });
+				tabs.forEach(function (a) {
+					var on = a.getAttribute('href') === '#' + panel.id;
+					a.classList.toggle('active', on);
+					if (on) { a.setAttribute('aria-current', 'page'); } else { a.removeAttribute('aria-current'); }
+				});
+				if (target && target !== panel) { target.scrollIntoView(); }
+				else if (target) { document.querySelector('.page-tabs').scrollIntoView(); }
+			}
+			window.addEventListener('hashchange', function () { show(location.hash); });
+			tabs.forEach(function (a) {
+				a.addEventListener('click', function (e) {
+					e.preventDefault();
+					history.replaceState(null, '', a.getAttribute('href'));
+					show(a.getAttribute('href'));
+				});
+			});
+			show(location.hash);
+		})();
+	</script>
 	<script>
 		window.addEventListener('pageshow', function (event) {
 			if (event.persisted) { window.location.reload(); }
@@ -113,17 +200,13 @@
 			});
 		})();
 
-		// Al enviar cualquier formulario del panel, bloqueamos todos los
-		// botones y mostramos un loader hasta que la respuesta llegue (o la
-		// página navegue). Evita que se puedan disparar acciones nuevas
-		// mientras una operación lenta (Docker, backups, git, etc.) termina.
+		// Al enviar un formulario se bloquean los botones hasta la respuesta, para no lanzar dos acciones lentas.
 		(function () {
 			var overlay = document.getElementById('admin-busy-overlay');
 
 			document.addEventListener('submit', function (event) {
 				if (event.defaultPrevented) { return; }
-				// Los formularios que abren otra pestaña (p. ej. "Entrar a
-				// WordPress") no navegan esta página: no hay nada que esperar.
+				// Los formularios que abren otra pestaña no navegan esta página.
 				var target = (event.submitter && event.submitter.getAttribute('formtarget')) || event.target.getAttribute('target');
 				if (target && target !== '_self') { return; }
 
@@ -143,7 +226,12 @@
 
 				overlay.classList.add('is-active');
 				overlay.setAttribute('aria-hidden', 'false');
-			}, true);
+			});
+
+			document.addEventListener('click', function (event) {
+				var btn = event.target.closest('[data-confirm]');
+				if (btn && !confirm(btn.dataset.confirm)) { event.preventDefault(); }
+			});
 
 			window.addEventListener('pageshow', function () {
 				overlay.classList.remove('is-active');
