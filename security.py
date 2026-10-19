@@ -48,9 +48,13 @@ JAILS = {
         'defaults': {'mode': 'observe', 'max_failures': 10, 'window_minutes': 10, 'ban_minutes': 1440,
                      'container': os.environ.get('PROXY_CONTAINER', 'proxy')},
     },
+    'ports': {
+        'label': 'Puertos vigilados', 'source': 'Firewall: "solo escuchar" y "protegido". Fallos = conexiones nuevas por IP',
+        'defaults': {'mode': 'ban', 'max_failures': 60, 'window_minutes': 1, 'ban_minutes': 60},
+    },
 }
 JAIL_MODES = {'off': 'Apagado', 'observe': 'Solo observar', 'ban': 'Bloquear'}
-SERVICE_LABELS = {'panel': 'Panel', 'sshd': 'SSH', 'sftp': 'SFTP', 'nginx': 'Web'}
+SERVICE_LABELS = {'panel': 'Panel', 'sshd': 'SSH', 'sftp': 'SFTP', 'nginx': 'Web', 'ports': 'Puertos'}
 _CONTAINER_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$')
 
 EVENT_RETENTION_DAYS = 30

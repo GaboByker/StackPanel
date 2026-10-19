@@ -210,6 +210,22 @@ def update_container_resources(container, cpus=None, mem_limit_mb=None):
     return True, ''
 
 
+def restart_policy(container):
+    """Nombre de la política de reinicio ('no', 'always', 'unless-stopped', ...) o None si no existe."""
+    status, raw = request('GET', f'/containers/{container}/json')
+    if status != 200:
+        return None
+    return (json.loads(raw).get('HostConfig', {}).get('RestartPolicy') or {}).get('Name') or 'no'
+
+
+def set_restart_policy(container, name):
+    """Cambia la política de reinicio sin recrear el contenedor (como `docker update --restart`)."""
+    status, raw = request('POST', f'/containers/{container}/update', body={'RestartPolicy': {'Name': name}}, timeout=20)
+    if status != 200:
+        return False, raw.decode('utf-8', errors='replace')
+    return True, ''
+
+
 def export_volume_tar(volume_name):
     """Exporta un volumen con nombre a bytes tar, vía un contenedor descartable."""
     helper = f'backup-export-{volume_name}'

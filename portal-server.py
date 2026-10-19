@@ -889,6 +889,27 @@ def admin_project_monitor_toggle(project_id):
     return redirect(url_for('admin_project_detail', project_id=project_id))
 
 
+@app.route('/admin/projects/<int:project_id>/autostart', methods=['POST'])
+def admin_project_autostart(project_id):
+    if not get_admin_id():
+        return redirect(url_for('admin_login'))
+    project = panel_db.get_project(PORTAL_ROOT, project_id)
+    if not project:
+        abort(404)
+    enable = request.form.get('autostart') == 'on'
+    errors = []
+    for container in panel_db.project_containers(project):
+        ok, err = docker_ops.set_restart_policy(container, 'unless-stopped' if enable else 'no')
+        if not ok:
+            errors.append(f'{container}: {err}')
+    if errors:
+        flash('No se pudo cambiar el inicio automático de: ' + '; '.join(errors), 'error')
+    else:
+        panel_db.log_action(PORTAL_ROOT, current_admin_email(), 'autostart on' if enable else 'autostart off', project['name'])
+        flash('Inicio automático activado.' if enable else 'Inicio automático desactivado.', 'success')
+    return redirect(url_for('admin_project_detail', project_id=project_id))
+
+
 @app.route('/admin/projects/<int:project_id>/auto-backup-quick-toggle', methods=['POST'])
 def admin_project_auto_backup_quick_toggle(project_id):
     if not get_admin_id():
@@ -995,6 +1016,9 @@ def admin_project_detail(project_id):
         project=project,
         containers=containers,
         docker_status=containers_status(containers) if containers else None,
+        autostart=bool(containers) and all(
+            docker_ops.restart_policy(c) in ('always', 'unless-stopped') for c in containers
+        ),
         databases=panel_db.list_databases(PORTAL_ROOT, project_id),
         has_git=has_git,
         has_env=has_env,
@@ -1731,6 +1755,7 @@ def admin_firewall():
         'admin_firewall.html',
         rows=firewall_rules.port_table(PORTAL_ROOT, published, listening),
         policies=firewall_rules.POLICIES,
+        port_jail=security.get_jails(PORTAL_ROOT).get('ports'),
         pending=firewall_rules.get_pending(PORTAL_ROOT),
         confirm_seconds=firewall_rules.CONFIRM_SECONDS,
         guard=guard_status,

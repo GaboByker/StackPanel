@@ -1,6 +1,7 @@
 """Exposición de puertos del servidor (/admin/firewall).
 
-Políticas: public (sin regla), restricted (solo las IPs indicadas) y closed (solo red interna).
+Políticas: public (sin regla), watch (abierto, registra a quien abre demasiadas conexiones), protect
+(abierto, bloquea a quien pasa el límite del jail "ports"), restricted (solo las IPs indicadas) y closed (solo red interna).
 Todo cambio se aplica a prueba (fw_pending); si no se confirma a tiempo, el agente vuelve solo
 a las reglas confirmadas (fw_ports). Las listas blancas siempre entran a cualquier puerto.
 """
@@ -14,7 +15,9 @@ import security
 CONFIRM_SECONDS = 120
 MAX_RULES = 200
 POLICIES = {
-    'public': 'Público',
+    'public': 'Abierto (sin vigilar)',
+    'watch': 'Abierto · solo escuchar',
+    'protect': 'Abierto · protegido',
     'restricted': 'Solo IPs permitidas',
     'closed': 'Cerrado (solo red interna)',
 }
@@ -124,7 +127,7 @@ def lockout_error(root, rules, admin_ip, panel_port, static_allow):
     protected = {('tcp', 22): 'SSH', ('tcp', panel_port): 'el panel'}
     for rule in rules:
         what = protected.get((rule['proto'], rule['port']))
-        if not what:
+        if not what or rule['policy'] in ('watch', 'protect'):
             continue
         if rule['policy'] == 'closed' or not security._in_any(admin_ip, rule['allow']):
             return (
@@ -164,6 +167,8 @@ def describe(rules):
     for r in rules:
         if r['policy'] == 'closed':
             parts.append(f'{r["port"]}/{r["proto"]} cerrado')
+        elif r['policy'] in ('watch', 'protect'):
+            parts.append(f'{r["port"]}/{r["proto"]} {"vigilado" if r["policy"] == "watch" else "protegido"}')
         else:
             parts.append(f'{r["port"]}/{r["proto"]} solo {", ".join(r["allow"])}')
     return '; '.join(parts)

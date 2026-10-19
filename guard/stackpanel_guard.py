@@ -29,7 +29,7 @@ from datetime import datetime, timezone
 import detector as detector_mod
 import sessions as sessions_mod
 
-VERSION = '4'
+VERSION = '5'
 TABLE = 'stackpanel'
 CONF_DIR = '/etc/stackpanel-guard'
 CONF_FILE = os.path.join(CONF_DIR, 'guard.conf')
@@ -166,12 +166,12 @@ def effective_port_rules(fw, static_allow):
             policy = item['policy']
         except (KeyError, TypeError, ValueError):
             continue
-        if proto not in ('tcp', 'udp') or not 1 <= port <= 65535 or policy not in ('restricted', 'closed'):
+        if proto not in ('tcp', 'udp') or not 1 <= port <= 65535 or policy not in ('restricted', 'closed', 'watch', 'protect'):
             continue
         if (proto, port) in seen:
             continue
         seen.add((proto, port))
-        if proto == 'tcp' and port == SSH_PORT and not static_allow:
+        if proto == 'tcp' and port == SSH_PORT and policy in ('restricted', 'closed') and not static_allow:
             skipped.append({'cidr': f'{proto}/{port}',
                             'reason': 'no se restringe SSH sin IPs en /etc/stackpanel-guard/allow.conf'})
             continue
@@ -360,6 +360,11 @@ def render(desired, stale_sets=()):
     wanted_sets = set()
     for rule in desired.get('ports', []):
         match = f'meta l4proto {rule["proto"]} th dport {rule["port"]}'
+        if rule['policy'] in ('watch', 'protect'):
+            # No bloquea: anota cada conexión nueva en el log del kernel para el jail "ports" del detector.
+            lines.append(f'add rule {t} ports {match} ct state new limit rate 50/second '
+                         f'log prefix "spg-{rule["policy"]} " level info')
+            continue
         if rule['policy'] == 'restricted':
             for fam, ver in (('ip', '4'), ('ip6', '6')):
                 name = f'r_{rule["proto"]}_{rule["port"]}_{ver}'

@@ -32,6 +32,12 @@
 
 <p class="admin-hint"><strong>Cerrado</strong> bloquea internet, pero el proxy y los contenedores siguen llegando.</p>
 <p class="admin-hint">
+	<strong>Abierto · solo escuchar</strong> deja pasar todo y avisa de las IPs que abren demasiadas conexiones;
+	<strong>Abierto · protegido</strong> además las bloquea. El límite se ajusta en
+	<a href="/admin/security#deteccion">Seguridad → Detección automática → Puertos vigilados</a>{% if port_jail %}
+	(ahora: {{ port_jail.max_failures }} conexiones en {{ port_jail.window_minutes }} min, bloqueo {{ port_jail.ban_minutes }} min{% if port_jail.mode != 'ban' %}, <strong>modo {{ port_jail.mode }}: no bloquea</strong>{% endif %}){% endif %}.
+</p>
+<p class="admin-hint">
 	Siempre entran: las IPs de la <a href="/admin/security#lista-blanca">lista blanca</a>{% if guard and guard.static_allow %} y la lista de emergencia del servidor ({% for n in guard.static_allow %}<code>{{ n }}</code>{{ ', ' if not loop.last else '' }}{% endfor %}){% endif %}.
 	Tu IP: <code>{{ my_ip }}</code> · panel en el puerto <code>{{ panel_port }}</code>.
 </p>

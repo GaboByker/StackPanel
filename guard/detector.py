@@ -1,6 +1,7 @@
 """Detección de stackpanel-guard: lee los logs de cada jail y bloquea las IPs que superan su límite.
 
-Jails: sshd (journald), sftp (contenedor stackpanel-sftp) y nginx (access log del proxy).
+Jails: sshd (journald), sftp (contenedor stackpanel-sftp), nginx (access log del proxy) y ports
+(conexiones nuevas a puertos en "solo escuchar"/"protegido", anotadas por nftables en el log del kernel).
 Modos: off, observe (solo registra y avisa) y ban. La configuración vive en settings.sec_jails;
 aquí solo están los valores por defecto. Cada IP de un log pasa por ipaddress antes de usarse.
 """
@@ -24,6 +25,8 @@ JAIL_DEFAULTS = {
              'container': 'stackpanel-sftp'},
     'nginx': {'mode': 'observe', 'max_failures': 10, 'window_minutes': 10, 'ban_minutes': 1440,
               'container': 'proxy'},
+    # max_failures = conexiones nuevas por IP en la ventana. Un puerto en "solo escuchar" nunca bloquea.
+    'ports': {'mode': 'ban', 'max_failures': 60, 'window_minutes': 1, 'ban_minutes': 60},
 }
 GLOBAL_DEFAULTS = {'sec_ban_multiplier': 2, 'sec_ban_max_minutes': 10080}
 RECIDIVE_LOOKBACK_DAYS = 30
@@ -60,6 +63,8 @@ NGINX_SCAN = re.compile(
     r'|/HNAP1|/actuator/|/wp-config\.php|/setup\.cgi|/GponForm|/\.DS_Store|/config\.json$|/server-status)'
 )
 NGINX_IGNORE = re.compile(r'^/\.well-known/acme-challenge/')
+
+PORT_LOG = re.compile(r'spg-(?P<mode>watch|protect) .*?\bSRC=(?P<ip>\S+) .*?\bPROTO=(?P<proto>TCP|UDP) .*?\bDPT=(?P<port>\d+)')
 
 
 def parse_ssh(message):
@@ -99,6 +104,14 @@ def parse_nginx(line):
     if not bad:
         return None
     return 'fail', m['ip'], None, None, f'{status} {req[:150]}'
+
+
+def parse_port_log(message):
+    """Línea del kernel puesta por la regla de nftables -> (modo, ip, 'puerto/proto') o None."""
+    m = PORT_LOG.search(message)
+    if not m:
+        return None
+    return m['mode'], m['ip'], f'{m["port"]}/{m["proto"].lower()}'
 
 
 # --- configuración ------------------------------------------------------------
@@ -212,6 +225,27 @@ class JournalReader(Reader):
             self.detector.handle(self.jail, ts, *parsed)
 
 
+class KernelReader(Reader):
+    def command(self):
+        cursor = self.detector.state.get('kernel_cursor')
+        self.info['source'] = 'journald: kernel (nftables)'
+        cmd = [JOURNALCTL, '-f', '-o', 'json', '_TRANSPORT=kernel', '--no-pager']
+        return cmd + (['--after-cursor', cursor] if cursor else ['-n', '0'])
+
+    def handle_line(self, raw):
+        if not raw.startswith('{'):
+            return
+        entry = json.loads(raw)
+        self.detector.state['kernel_cursor'] = entry.get('__CURSOR')
+        message = entry.get('MESSAGE')
+        parsed = parse_port_log(message) if isinstance(message, str) else None
+        if parsed:
+            mode, ip, where = parsed
+            ts = datetime.fromtimestamp(int(entry['__REALTIME_TIMESTAMP']) / 1e6, timezone.utc)
+            self.detector.handle(self.jail, ts, 'fail', ip, None, None, f'conexión a {where}',
+                                 mode='observe' if mode == 'watch' else None)
+
+
 class DockerReader(Reader):
     def __init__(self, detector, jail, parser):
         super().__init__(detector, jail)
@@ -304,6 +338,8 @@ class Detector:
                     reader = JournalReader(self, name)
                 elif name == 'sftp':
                     reader = DockerReader(self, name, parse_ssh)
+                elif name == 'ports':
+                    reader = KernelReader(self, name)
                 else:
                     reader = DockerReader(self, name, parse_nginx)
                 self.readers[name] = reader
@@ -311,7 +347,8 @@ class Detector:
                 log.info('jail %s activa en modo %s', name, conf['mode'])
 
     # eventos -----------------------------------------------------------------
-    def handle(self, jail, ts, result, ip, port, user, detail):
+    def handle(self, jail, ts, result, ip, port, user, detail, mode=None):
+        """mode='observe' fuerza solo registrar aunque el jail bloquee (puertos en "solo escuchar")."""
         try:
             addr = ipaddress.ip_address(ip)
         except ValueError:
@@ -333,8 +370,10 @@ class Detector:
                 while len(self.counted_conns) > 20000:
                     self.counted_conns.popitem(last=False)
             success = result == 'ok'
-            self.pending_events.append((ts.isoformat(), ip, jail, 'ssh' if jail != 'nginx' else 'http',
-                                        (user or None), 1 if success else 0, detail))
+            # En ports cada conexión es tráfico normal, no un evento: solo cuenta al pasar el límite.
+            if jail != 'ports':
+                self.pending_events.append((ts.isoformat(), ip, jail, 'ssh' if jail != 'nginx' else 'http',
+                                            (user or None), 1 if success else 0, detail))
             if success or self.guard.is_allowed(ip) or self.guard.is_banned(ip):
                 return
             self.stats[jail]['failures'] += 1
@@ -347,7 +386,7 @@ class Detector:
                 return
             count = len(window)
             window.clear()
-            if conf['mode'] == 'observe':
+            if conf['mode'] == 'observe' or mode == 'observe':
                 last = self.observed.get((jail, ip))
                 if last and ts - last < timedelta(minutes=conf['window_minutes']):
                     return
@@ -384,7 +423,8 @@ class Detector:
             new_ban = False
             for ip, jail, count, conf, observe_only in bans:
                 cidr = str(ipaddress.ip_network(ip))
-                reason = f'{count} intentos fallidos en {conf["window_minutes"]} min'
+                what = 'conexiones nuevas' if jail == 'ports' else 'intentos fallidos'
+                reason = f'{count} {what} en {conf["window_minutes"]} min'
                 if observe_only:
                     conn.execute(
                         'INSERT INTO audit_log (ts, admin_email, action, detail) VALUES (?, NULL, ?, ?)',
