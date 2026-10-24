@@ -1,0 +1,10 @@
+.odin-products{display:grid;grid-template-columns:repeat(var(--odin-cols),minmax(0,1fr));gap:1.5rem;list-style:none;margin:0;padding:0}
+@media (max-width:1024px){.odin-products{grid-template-columns:repeat(min(var(--odin-cols),3),minmax(0,1fr))}}
+@media (max-width:600px){.odin-products{grid-template-columns:repeat(2,minmax(0,1fr));gap:1rem}}
+.odin-product{display:flex;flex-direction:column;gap:.5rem;position:relative}
+.odin-product__link{display:flex;flex-direction:column;gap:.5rem;color:inherit;text-decoration:none}
+.odin-product__img img{width:100%;height:auto;aspect-ratio:1;object-fit:cover;border-radius:8px;display:block}
+.odin-product__name{font-weight:600}
+.odin-product__badge{position:absolute;top:.5rem;left:.5rem;z-index:1;background:#c62828;color:#fff;font-size:.75rem;font-weight:700;padding:.2em .6em;border-radius:4px}
+.odin-product__price del{opacity:.6;margin-right:.3em}
+.odin-product__btn{margin-top:auto;text-align:center}

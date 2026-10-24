@@ -55,6 +55,11 @@
 			<p class="field-hint">El DNS de este dominio ya debe apuntar a este servidor.</p>
 		</div>
 		<div class="field">
+			<label for="extra_domains">Dominios adicionales (opcional)</label>
+			<textarea id="extra_domains" name="extra_domains" rows="3" placeholder="www.midominio.com&#10;otrodominio.com"></textarea>
+			<p class="field-hint">Uno por línea. Todos redirigen al dominio principal. El www/sin www se agrega solo si su DNS apunta aquí.</p>
+		</div>
+		<div class="field">
 			<label for="proxy_target_port">Destino interno (puerto)</label>
 			<input type="number" id="proxy_target_port" name="proxy_target_port" min="1" max="65535" placeholder="8080"/>
 			<p class="field-hint">El host de destino se resuelve automáticamente (host.docker.internal); solo indica el puerto donde ya responde la app.</p>

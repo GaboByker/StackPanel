@@ -1,0 +1,64 @@
+{% extends "base_admin.html" %}
+{% block title %}Editar administrador{% endblock %}
+{% block heading %}Editar administrador{% endblock %}
+{% block content %}
+
+{% if error %}
+<div class="alert alert-error">{{ error }}</div>
+{% endif %}
+
+{% macro reauth_fields(prefix) %}
+<div class="form-row">
+	<div class="field">
+		<label for="{{ prefix }}-pass">Tu contraseña actual</label>
+		<input type="password" id="{{ prefix }}-pass" name="password" autocomplete="current-password" required/>
+	</div>
+	{% if totp_enabled %}
+	<div class="field">
+		<label for="{{ prefix }}-code">Tu código 2FA</label>
+		<input type="text" id="{{ prefix }}-code" name="code" inputmode="numeric" maxlength="6" autocomplete="one-time-code" required/>
+	</div>
+	{% endif %}
+</div>
+{% endmacro %}
+
+<form method="post" style="max-width:480px;">
+	<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+	<div class="field">
+		<label for="email">Correo electrónico</label>
+		<input type="email" id="email" name="email" value="{{ target.email }}" required/>
+	</div>
+	<div class="field">
+		<label for="new_password">Contraseña nueva</label>
+		<input type="password" id="new_password" name="new_password" minlength="8" autocomplete="new-password" placeholder="Déjala vacía para no cambiarla"/>
+		<p class="admin-hint">Al cambiarla se cierran las sesiones abiertas de {{ 'tu cuenta' if is_self else 'este administrador' }}.</p>
+	</div>
+	{% if not is_self and target.totp_enabled %}
+	<div class="field">
+		<label><input type="checkbox" name="reset_2fa" value="1"/> Restablecer 2FA (tendrá que configurarlo de nuevo)</label>
+	</div>
+	{% elif is_self %}
+	<p class="admin-hint">Tu 2FA se gestiona en <a href="/admin/2fa">Mi cuenta → Verificación en dos pasos</a>.</p>
+	{% endif %}
+	{{ reauth_fields('ed') }}
+	<button type="submit" class="btn btn-primary">Guardar cambios</button>
+	<a class="btn btn-secondary" href="/admin/admins">Cancelar</a>
+</form>
+
+{% if not is_self %}
+<article class="admin-service-card danger-card form-card" id="eliminar" style="margin-top:32px;max-width:480px;">
+	<div class="admin-service-head">
+		<h3>Eliminar administrador</h3>
+	</div>
+	<p>{{ target.email }} perderá el acceso al panel de inmediato. No se puede deshacer.</p>
+	<form method="post" action="/admin/admins/{{ target.id }}/delete">
+		<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+		{{ reauth_fields('del') }}
+		<div class="admin-actions">
+			<button type="submit" class="btn btn-danger" data-confirm="¿Eliminar a {{ target.email }}?">Eliminar administrador</button>
+		</div>
+	</form>
+</article>
+{% endif %}
+
+{% endblock %}

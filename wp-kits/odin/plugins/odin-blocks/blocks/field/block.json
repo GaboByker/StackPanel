@@ -1,0 +1,21 @@
+{
+	"$schema": "https://schemas.wp.org/trunk/block.json",
+	"apiVersion": 3,
+	"name": "odin/field",
+	"title": "Campo de formulario",
+	"category": "odin",
+	"icon": "edit",
+	"ancestor": ["odin/form"],
+	"textdomain": "odin-blocks",
+	"attributes": {
+		"label": { "type": "string", "default": "" },
+		"name": { "type": "string", "default": "" },
+		"type": { "type": "string", "default": "text" },
+		"required": { "type": "boolean", "default": false },
+		"placeholder": { "type": "string", "default": "" },
+		"options": { "type": "string", "default": "" },
+		"width": { "type": "string", "default": "100" }
+	},
+	"supports": { "html": false, "reusable": false },
+	"editorScript": "odin-blocks-editor"
+}

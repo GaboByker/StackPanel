@@ -3,7 +3,7 @@
 {% block heading %}Proxy &amp; SSL{% endblock %}
 {% block content %}
 
-<p class="admin-hint">Emite el SSL cuando el DNS del dominio ya apunte a este servidor.</p>
+<p class="admin-hint">Emite el SSL cuando el DNS del dominio ya apunte a este servidor. Si la versión con o sin <code>www</code> también apunta aquí, el panel la incluye en el certificado y la redirige al dominio que registraste. Puedes agregar más dominios en «Dominios adicionales»; también redirigen al principal. Los dominios que lleguen sin sitio configurado se rechazan.</p>
 
 <div class="stats-grid">
 	<div class="stat-tile">
@@ -75,7 +75,22 @@
 					<tbody>
 						{% for s in sites %}
 						<tr>
-							<td><a href="https://{{ s.domain }}" target="_blank" rel="noopener">{{ s.domain }}</a></td>
+							<td>
+								<a href="https://{{ s.domain }}" target="_blank" rel="noopener">{{ s.domain }}</a>
+								{% for a in s.aliases %}<div style="font-size:12px; color:var(--text-muted);">{{ a }} → redirige aquí</div>{% endfor %}
+								{% for a in s.extra_domains if a not in s.aliases %}<div style="font-size:12px; color:var(--warn-text);">{{ a }} → pendiente (DNS o SSL)</div>{% endfor %}
+								{% if s.managed %}
+								<details style="margin-top:6px;">
+									<summary style="font-size:12px; cursor:pointer;">Dominios adicionales</summary>
+									<form method="post" action="/admin/proxy/{{ s.id }}/domains" style="margin-top:6px;">
+										<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+										<textarea name="extra_domains" rows="3" style="width:100%; min-width:220px;" placeholder="otrodominio.com&#10;www.otrodominio.com">{{ s.extra_domains | join('\n') }}</textarea>
+										<p class="field-hint" style="margin:4px 0;">Uno por línea. Redirigen a {{ s.domain }}. El www/sin www se agrega solo si su DNS apunta aquí.</p>
+										<button type="submit" class="btn btn-secondary btn-sm">Guardar dominios</button>
+									</form>
+								</details>
+								{% endif %}
+							</td>
 							<td><code>{{ s.target_host }}:{{ s.target_port }}</code></td>
 							<td>
 								<span class="status-pill {{ 'running' if s.ssl_enabled else 'pending' }}">
@@ -149,6 +164,11 @@
 				<div class="field">
 					<label for="domain">Dominio</label>
 					<input type="text" id="domain" name="domain" required placeholder="midominio.com"/>
+				</div>
+				<div class="field">
+					<label for="extra_domains">Dominios adicionales (opcional)</label>
+					<textarea id="extra_domains" name="extra_domains" rows="3" placeholder="www.midominio.com&#10;otrodominio.com"></textarea>
+					<p class="field-hint">Uno por línea. Todos redirigen al dominio principal.</p>
 				</div>
 				<div class="field">
 					<label for="project_select">Destino</label>

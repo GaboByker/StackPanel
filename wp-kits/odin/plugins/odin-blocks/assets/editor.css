@@ -1,0 +1,7 @@
+.odin-editor-box{border:1px dashed #8c8f94;border-radius:8px;padding:1rem;position:relative}
+.odin-editor-tag{display:inline-block;font:600 11px/1.6 system-ui,sans-serif;text-transform:uppercase;letter-spacing:.04em;background:#1e1e1e;color:#fff;padding:0 .5em;border-radius:3px;margin-bottom:.75rem}
+.odin-editor-slider__track{display:flex;gap:16px;overflow-x:auto;padding-bottom:.5rem}
+.odin-editor-slider .wp-block-odin-slide{flex:0 0 min(80%,520px);border:1px dashed #c3c4c7;border-radius:6px;padding:1rem;box-sizing:border-box}
+.odin-editor-field{display:flex;flex-direction:column;gap:.3rem}
+.odin-editor-field__fake{border:1px solid #c3c4c7;border-radius:6px;padding:.6em .8em;color:#757575;background:#fff;min-height:1.2em}
+.odin-editor-field__fake.is-textarea{min-height:5em}

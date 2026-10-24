@@ -1,0 +1,16 @@
+.odin-form{display:grid;gap:var(--wp--style--block-gap,1rem)}
+.odin-form__fields{display:flex;flex-wrap:wrap;gap:1rem}
+.odin-field{flex:1 1 100%;display:flex;flex-direction:column;gap:.35rem;margin:0;border:0;padding:0;min-width:0}
+.odin-field.is-w-50{flex-basis:calc(50% - .5rem)}
+.odin-field.is-w-33{flex-basis:calc(33.333% - .67rem)}
+@media (max-width:600px){.odin-field.is-w-50,.odin-field.is-w-33{flex-basis:100%}}
+.odin-field label,.odin-field legend{font-weight:600;font-size:.9em}
+.odin-field input:not([type=checkbox]):not([type=radio]),.odin-field select,.odin-field textarea{width:100%;box-sizing:border-box;padding:.7em .85em;border:1px solid color-mix(in srgb,currentColor 25%,transparent);border-radius:6px;background:transparent;color:inherit;font:inherit}
+.odin-field :focus-visible{outline:2px solid var(--wp--preset--color--accent-1,currentColor);outline-offset:1px}
+.odin-field__choice{display:flex;align-items:center;gap:.5em;font-weight:400!important}
+.odin-field__req{color:#c62828}
+.odin-form__submit{justify-self:start;cursor:pointer}
+.odin-form__status{padding:.8em 1em;border-radius:6px}
+.odin-form__status.is-ok{background:#e7f6ec;color:#14532d}
+.odin-form__status.is-error{background:#fdecea;color:#7f1d1d}
+.odin-form__hp{position:absolute!important;left:-9999px;width:1px;height:1px;overflow:hidden}

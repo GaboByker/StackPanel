@@ -1,0 +1,30 @@
+{
+	"$schema": "https://schemas.wp.org/trunk/block.json",
+	"apiVersion": 3,
+	"name": "odin/products",
+	"title": "Productos (grilla)",
+	"category": "odin",
+	"icon": "products",
+	"description": "Grilla de productos de WooCommerce con filtros. Sin JS en la página.",
+	"keywords": ["woocommerce", "tienda", "productos"],
+	"textdomain": "odin-blocks",
+	"attributes": {
+		"count": { "type": "number", "default": 8 },
+		"columns": { "type": "number", "default": 4 },
+		"category": { "type": "string", "default": "" },
+		"orderby": { "type": "string", "default": "date" },
+		"onSale": { "type": "boolean", "default": false },
+		"featured": { "type": "boolean", "default": false },
+		"showPrice": { "type": "boolean", "default": true },
+		"showButton": { "type": "boolean", "default": true },
+		"showRating": { "type": "boolean", "default": false }
+	},
+	"supports": {
+		"html": false,
+		"align": ["wide", "full"],
+		"spacing": { "padding": true, "margin": true }
+	},
+	"editorScript": "odin-blocks-editor",
+	"editorStyle": "odin-blocks-editor",
+	"style": "file:./style.css"
+}

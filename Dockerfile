@@ -14,6 +14,7 @@ COPY portal-server.py auth.py docker_control.py system_monitor.py panel_db.py pr
      project_git.py notification_control.py security.py guard_client.py sshadm_client.py firewall_rules.py ssh_access.py wp_sso.py resource_charts.py site_presets.py db_viewer.py db_autodetect.py scheduler.py ./
 COPY templates/ templates/
 COPY static/ static/
+COPY wp-kits/ wp-kits/
 
 RUN mkdir -p instance
 

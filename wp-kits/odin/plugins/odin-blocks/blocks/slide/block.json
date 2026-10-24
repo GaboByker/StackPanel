@@ -1,0 +1,21 @@
+{
+	"$schema": "https://schemas.wp.org/trunk/block.json",
+	"apiVersion": 3,
+	"name": "odin/slide",
+	"title": "Diapositiva",
+	"category": "odin",
+	"icon": "format-image",
+	"parent": ["odin/slider"],
+	"textdomain": "odin-blocks",
+	"supports": {
+		"html": false,
+		"reusable": false,
+		"color": { "background": true, "text": true, "gradients": true },
+		"background": { "backgroundImage": true, "backgroundSize": true },
+		"dimensions": { "minHeight": true },
+		"spacing": { "padding": true, "blockGap": true },
+		"layout": { "allowJustification": true, "default": { "type": "flex", "orientation": "vertical", "justifyContent": "center" } },
+		"__experimentalBorder": { "radius": true }
+	},
+	"editorScript": "odin-blocks-editor"
+}

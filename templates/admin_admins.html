@@ -9,14 +9,21 @@
 <div class="admin-table-wrap">
 	<table class="admin-table">
 		<thead>
-			<tr><th>Correo</th><th>Creado</th><th>Creado por</th></tr>
+			<tr><th>Correo</th><th>2FA</th><th>Creado</th><th>Creado por</th><th><span class="sr-only">Acciones</span></th></tr>
 		</thead>
 		<tbody>
 			{% for admin in admins %}
 			<tr>
-				<td>{{ admin.email }}</td>
+				<td>{{ admin.email }}{% if admin.id == current_id %} <small>(tú)</small>{% endif %}</td>
+				<td>{% if admin.totp_enabled %}<span class="status-pill running">Activo</span>{% else %}<span class="status-pill pending">No</span>{% endif %}</td>
 				<td>{{ admin.created_at[:19].replace('T', ' ') if admin.created_at else '—' }}</td>
 				<td>{{ admin.created_by_email or '—' }}</td>
+				<td style="text-align:right;white-space:nowrap;">
+					<a class="btn btn-secondary btn-sm" href="/admin/admins/{{ admin.id }}/edit">Editar</a>
+					{% if admin.id != current_id %}
+					<a class="btn btn-danger btn-sm" href="/admin/admins/{{ admin.id }}/edit#eliminar">Eliminar</a>
+					{% endif %}
+				</td>
 			</tr>
 			{% endfor %}
 		</tbody>

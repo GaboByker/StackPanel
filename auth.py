@@ -209,7 +209,7 @@ def list_admins(root):
     with _connect(root) as conn:
         rows = conn.execute(
             '''
-            SELECT a.id, a.email, a.created_at, c.email AS created_by_email
+            SELECT a.id, a.email, a.created_at, a.totp_enabled, c.email AS created_by_email
             FROM admins a
             LEFT JOIN admins c ON c.id = a.created_by
             ORDER BY a.id
@@ -238,6 +238,45 @@ def create_admin(root, email, password, created_by_id):
     except sqlite3.IntegrityError:
         return None, 'Ya existe un administrador con ese correo.'
     return email, None
+
+
+def get_admin_by_id(root, admin_id):
+    with _connect(root) as conn:
+        row = conn.execute(
+            'SELECT id, email, created_at, totp_enabled FROM admins WHERE id = ?', (admin_id,)
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def update_admin(root, admin_id, email, new_password=None):
+    """Cambia el correo y, si se indica, la contraseña (cierra las sesiones de ese admin)."""
+    email = normalize_email(email)
+    if not EMAIL_RE.match(email):
+        return False, 'Correo electrónico no válido.'
+    if new_password and len(new_password) < MIN_PASSWORD_LEN:
+        return False, f'La contraseña debe tener al menos {MIN_PASSWORD_LEN} caracteres.'
+    try:
+        with _connect(root) as conn:
+            conn.execute('UPDATE admins SET email = ? WHERE id = ?', (email, admin_id))
+            if new_password:
+                conn.execute(
+                    'UPDATE admins SET password_hash = ?, session_epoch = session_epoch + 1 WHERE id = ?',
+                    (generate_password_hash(new_password), admin_id),
+                )
+    except sqlite3.IntegrityError:
+        return False, 'Ya existe un administrador con ese correo.'
+    return True, None
+
+
+def delete_admin(root, admin_id):
+    with _connect(root) as conn:
+        if conn.execute('SELECT COUNT(*) FROM admins').fetchone()[0] <= 1:
+            return False, 'No se puede eliminar el único administrador.'
+        conn.execute('UPDATE admins SET created_by = NULL WHERE created_by = ?', (admin_id,))
+        deleted = conn.execute('DELETE FROM admins WHERE id = ?', (admin_id,)).rowcount
+    if not deleted:
+        return False, 'El administrador no existe.'
+    return True, None
 
 
 def admin_required(view):

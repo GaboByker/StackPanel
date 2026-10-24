@@ -64,6 +64,7 @@ def init_db(root):
             '''
         )
         _migrate_projects_columns(conn)
+        _migrate_sites_columns(conn)
         # Datos propios de esta instalación, si existen (site_presets.py).
         _seed_sites(conn)
         _seed_projects(conn)
@@ -177,6 +178,16 @@ def _migrate_projects_columns(conn):
             conn.execute(ddl)
 
 
+def _migrate_sites_columns(conn):
+    existing = {row[1] for row in conn.execute('PRAGMA table_info(sites)')}
+    if 'aliases' not in existing:
+        # Nombres extra del mismo sitio (www <-> sin www) que redirigen al dominio principal.
+        conn.execute("ALTER TABLE sites ADD COLUMN aliases TEXT NOT NULL DEFAULT ''")
+    if 'extra_domains' not in existing:
+        # Dominios adicionales que el admin agrega a mano; también redirigen al principal.
+        conn.execute("ALTER TABLE sites ADD COLUMN extra_domains TEXT NOT NULL DEFAULT ''")
+
+
 def _migrate_metrics_columns(conn):
     existing = {row[1] for row in conn.execute('PRAGMA table_info(metrics_history)')}
     if not existing:
@@ -261,16 +272,39 @@ def _seed_projects(conn):
 
 # --- sites ---------------------------------------------------------------
 
+def _site_row(row):
+    site = dict(row)
+    site['aliases'] = [a for a in (site.get('aliases') or '').split(',') if a]
+    site['extra_domains'] = [a for a in (site.get('extra_domains') or '').split(',') if a]
+    return site
+
+
 def list_sites(root):
     with _connect(root) as conn:
         rows = conn.execute('SELECT * FROM sites ORDER BY domain').fetchall()
-    return [dict(row) for row in rows]
+    return [_site_row(row) for row in rows]
 
 
 def get_site(root, site_id):
     with _connect(root) as conn:
         row = conn.execute('SELECT * FROM sites WHERE id = ?', (site_id,)).fetchone()
-    return dict(row) if row else None
+    return _site_row(row) if row else None
+
+
+def taken_domains(root, exclude_site_id=None):
+    """Todos los nombres ya enrutados (dominios principales y alias), en minúsculas."""
+    taken = set()
+    for site in list_sites(root):
+        if site['id'] != exclude_site_id:
+            taken.add(site['domain'].lower())
+            taken.update(site['aliases'])
+            taken.update(site['extra_domains'])
+    return taken
+
+
+def set_site_aliases(root, site_id, aliases):
+    with _connect(root) as conn:
+        conn.execute('UPDATE sites SET aliases = ? WHERE id = ?', (','.join(aliases), site_id))
 
 
 def validate_domain(domain):
@@ -280,8 +314,34 @@ def validate_domain(domain):
     return domain, None
 
 
-def create_site(root, domain, target_host, target_port, project_id=None):
+def parse_extra_domains(root, raw, main_domain, exclude_site_id=None):
+    """Lista de dominios adicionales (separados por coma, espacio o línea). Devuelve (lista, error)."""
+    taken = taken_domains(root, exclude_site_id=exclude_site_id)
+    result = []
+    for item in re.split(r'[\s,;]+', raw or ''):
+        if not item:
+            continue
+        domain, error = validate_domain(item)
+        if error:
+            return None, f'Dominio adicional no válido: {item}'
+        if domain == main_domain or domain in result:
+            continue
+        if domain in taken:
+            return None, f'{domain} ya está enrutado por otro sitio.'
+        result.append(domain)
+    return result, None
+
+
+def set_site_extra_domains(root, site_id, domains):
+    with _connect(root) as conn:
+        conn.execute('UPDATE sites SET extra_domains = ? WHERE id = ?', (','.join(domains), site_id))
+
+
+def create_site(root, domain, target_host, target_port, project_id=None, extra_domains=''):
     domain, error = validate_domain(domain)
+    if error:
+        return None, error
+    extras, error = parse_extra_domains(root, extra_domains, domain)
     if error:
         return None, error
     target_host = (target_host or '').strip()
@@ -293,14 +353,16 @@ def create_site(root, domain, target_host, target_port, project_id=None):
             raise ValueError
     except (TypeError, ValueError):
         return None, 'El puerto destino no es válido.'
+    if domain in taken_domains(root):
+        return None, 'Ese dominio ya está enrutado (como sitio o como alias www/sin www de otro sitio).'
     try:
         with _connect(root) as conn:
             cur = conn.execute(
                 '''
-                INSERT INTO sites (domain, target_host, target_port, ssl_enabled, managed, notes, created_at)
-                VALUES (?, ?, ?, 0, 1, ?, ?)
+                INSERT INTO sites (domain, target_host, target_port, ssl_enabled, managed, notes, created_at, extra_domains)
+                VALUES (?, ?, ?, 0, 1, ?, ?, ?)
                 ''',
-                (domain, target_host, target_port, f'project:{project_id}' if project_id else None, _now()),
+                (domain, target_host, target_port, f'project:{project_id}' if project_id else None, _now(), ','.join(extras)),
             )
             site_id = cur.lastrowid
     except sqlite3.IntegrityError:

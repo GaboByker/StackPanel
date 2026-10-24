@@ -52,6 +52,12 @@ DB_DIR="$(dirname "$(grep -E '^DB_PATH=' /etc/stackpanel-guard/guard.conf | cut 
 install -d -m 0755 /etc/systemd/system/stackpanel-guard.service.d
 printf '[Service]\nReadWritePaths=%s\n' "$DB_DIR" > /etc/systemd/system/stackpanel-guard.service.d/db-path.conf
 
+# El detector solo lee el journal en vivo: el historial viejo sobra. journald rota y borra solo.
+install -d -m 0755 /etc/systemd/journald.conf.d
+printf '[Journal]\nSystemMaxUse=%s\nMaxRetentionSec=%s\n' "${JOURNAL_MAX_USE:-500M}" "${JOURNAL_MAX_AGE:-1month}" \
+	> /etc/systemd/journald.conf.d/stackpanel.conf
+systemctl restart systemd-journald
+
 # --- stackpanel-sshadm (se omite con STACKPANEL_SSHADM=0) ---
 # Usuarios protegidos: por defecto quien ejecuta con sudo; otros con SSHADM_PROTECTED_USERS="ana luis".
 SSHADM_UNITS=""

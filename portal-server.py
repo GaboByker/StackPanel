@@ -6,6 +6,7 @@ import re
 import secrets
 import shutil
 import sqlite3
+import threading
 import time
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
@@ -33,17 +34,21 @@ from auth import (
     change_password,
     confirm_totp,
     create_admin,
+    delete_admin,
     disable_totp,
     get_admin,
+    get_admin_by_id,
     get_admin_id,
     get_session_epoch,
     get_totp_state,
     init_db,
     list_admins,
     login_admin,
+    normalize_email,
     logout_admin,
     revoke_sessions,
     set_totp_secret,
+    update_admin,
     verify_totp,
 )
 from docker_control import (
@@ -113,6 +118,47 @@ def get_certbot_email():
     return panel_db.get_setting(PORTAL_ROOT, 'certbot_email') or CERTBOT_EMAIL
 
 
+def _site_aliases(site):
+    """Dominios adicionales + www/sin www del sitio que no use otro sitio."""
+    return proxy_control.site_aliases(
+        site['domain'], panel_db.taken_domains(PORTAL_ROOT, exclude_site_id=site['id']), site.get('extra_domains') or (),
+    )
+
+
+def _publish_site(site):
+    """Crea el sitio por HTTP con sus alias. Devuelve (ok, error)."""
+    aliases = _site_aliases(site)
+    panel_db.set_site_aliases(PORTAL_ROOT, site['id'], aliases)
+    return proxy_control.apply_site(
+        PROXY_SITES_DIR, site['domain'], site['target_host'], site['target_port'], ssl_ready=False, aliases=aliases,
+    )
+
+
+def _issue_site_ssl(site):
+    """Emite el certificado (dominio + alias que ya apuntan aquí) y activa HTTPS. Devuelve (ok, mensaje)."""
+    wanted = _site_aliases(site)
+    aliases = proxy_control.reachable_aliases(site['domain'], wanted)
+    cert_ok, cert_out = proxy_control.issue_certificate(site['domain'], get_certbot_email(), aliases=aliases)
+    if not cert_ok and aliases:
+        # El alias pudo fallar (DNS a medio propagar): al menos el dominio principal queda con SSL.
+        aliases = []
+        cert_ok, cert_out = proxy_control.issue_certificate(site['domain'], get_certbot_email())
+    if not cert_ok:
+        return False, f"No se pudo emitir el certificado: {cert_out.strip()[-300:]}"
+    panel_db.set_site_aliases(PORTAL_ROOT, site['id'], aliases)
+    ok, apply_error = proxy_control.apply_site(
+        PROXY_SITES_DIR, site['domain'], site['target_host'], site['target_port'], ssl_ready=True, aliases=aliases,
+    )
+    if not ok:
+        return False, f'Certificado emitido, pero no se pudo activar en el proxy: {apply_error}'
+    panel_db.set_site_ssl(PORTAL_ROOT, site['id'], True)
+    extra = f" (también {', '.join(aliases)}, que redirige{'n' if len(aliases) > 1 else ''} a {site['domain']})" if aliases else ''
+    missing = [a for a in wanted if a not in aliases]
+    if missing:
+        extra += f". Sin SSL todavía (su DNS no apunta aquí): {', '.join(missing)}"
+    return True, f"SSL activo para {site['domain']}{extra}."
+
+
 def _project_local_folder(project):
     """Carpeta del proyecto en el montaje r/w del panel (solo proyectos bajo html/)."""
     folder = (project or {}).get('folder') or ''
@@ -121,8 +167,11 @@ def _project_local_folder(project):
     return os.path.join(files_control.html_root(STACK_ROOT), folder[5:])
 
 
+WP_TEMPLATES = ('wordpress', 'wordpress-odin')
+
+
 def _is_wordpress(project):
-    return project.get('template') == 'wordpress' or wp_sso.is_wordpress(_project_local_folder(project))
+    return project.get('template') in WP_TEMPLATES or wp_sso.is_wordpress(_project_local_folder(project))
 
 
 def _project_paths(key):
@@ -674,26 +723,18 @@ def admin_project_new():
                 target_port = request.form.get('proxy_target_port') or project.get('port') or 80
                 site, site_error = panel_db.create_site(
                     PORTAL_ROOT, project['domain'], target_host, target_port, project_id=project['id'],
+                    extra_domains=request.form.get('extra_domains', ''),
                 )
                 if site:
-                    ok, apply_error = proxy_control.apply_site(
-                        PROXY_SITES_DIR, site['domain'], site['target_host'], site['target_port'], ssl_ready=False,
-                    )
+                    ok, apply_error = _publish_site(site)
                     if not ok:
                         flash(f'Proyecto creado, pero el proxy no se pudo aplicar: {apply_error}', 'error')
                     elif want_ssl:
-                        cert_ok, cert_out = proxy_control.issue_certificate(site['domain'], get_certbot_email())
+                        cert_ok, cert_msg = _issue_site_ssl(site)
                         if cert_ok:
-                            proxy_control.apply_site(
-                                PROXY_SITES_DIR, site['domain'], site['target_host'], site['target_port'], ssl_ready=True,
-                            )
-                            panel_db.set_site_ssl(PORTAL_ROOT, site['id'], True)
-                            flash('Proyecto y dominio creados. Certificado SSL emitido.', 'success')
+                            flash(f'Proyecto y dominio creados. {cert_msg}', 'success')
                         else:
-                            flash(
-                                f'Proyecto y dominio creados, pero no se pudo emitir el SSL todavía: {cert_out.strip()[-300:]}',
-                                'error',
-                            )
+                            flash(f'Proyecto y dominio creados, pero el SSL aún no: {cert_msg}', 'error')
                     else:
                         flash('Proyecto y dominio creados. Emite el SSL cuando el DNS ya apunte aquí.', 'success')
                 else:
@@ -1023,7 +1064,7 @@ def admin_project_detail(project_id):
         has_git=has_git,
         has_env=has_env,
         can_clone=bool(project.get('template')),
-        has_php_config=project.get('template') == 'wordpress',
+        has_php_config=project.get('template') in WP_TEMPLATES,
         is_wordpress=_is_wordpress(project),
         wp_credentials={k: v for k, v in panel_db.project_secrets(project).items() if k.startswith('wp_admin_')},
         repos=panel_db.project_repos(project),
@@ -1274,7 +1315,7 @@ def admin_project_php_config(project_id):
     if gate:
         return gate
     project = panel_db.get_project(PORTAL_ROOT, project_id)
-    if not project or project.get('template') != 'wordpress' or not project.get('folder'):
+    if not project or project.get('template') not in WP_TEMPLATES or not project.get('folder'):
         abort(404)
     local_folder = os.path.join(files_control.html_root(STACK_ROOT), project['folder'][5:])
     host_folder = os.path.join(HOST_STACK_ROOT, project['folder'])
@@ -1427,6 +1468,23 @@ def admin_project_install(template_key):
         return redirect(url_for('admin_project_install_index'))
 
     key = panel_db.reserve_key(PORTAL_ROOT, name)
+    # Recargar la página mientras instala reenvía el POST: el segundo pisaría los contenedores del primero.
+    with _installing_lock:
+        if key in _installing:
+            flash(f'{name} ya se está instalando; espera a que termine.', 'error')
+            return redirect(url_for('admin_projects'))
+        _installing.add(key)
+    try:
+        return _install_app(template_key, name, key, port)
+    finally:
+        _installing.discard(key)
+
+
+_installing = set()
+_installing_lock = threading.Lock()
+
+
+def _install_app(template_key, name, key, port):
     local_folder, host_folder = _project_paths(key)
     containers, volumes, secrets, error = app_templates.install(template_key, key, local_folder, host_folder, port)
     if error:
@@ -1434,16 +1492,25 @@ def admin_project_install(template_key):
         return redirect(url_for('admin_project_install_index'))
 
     wp_warning = None
-    if template_key == 'wordpress':
+    if template_key in WP_TEMPLATES:
         # Completa la instalación para entrar desde el panel sin pasar por el asistente.
         wp_sso.ensure(local_folder)
         wp_user = f'{key}-admin'
+        wp_bases = [f'http://{key}-app', f'http://host.docker.internal:{port}']
+        wp_public = f'http://{get_public_host()}:{port}/'
         wp_password, wp_warning = wp_sso.complete_install(
-            [f'http://{key}-app', f'http://host.docker.internal:{port}'],
-            f'http://{get_public_host()}:{port}/', name, current_admin_email() or get_certbot_email(), wp_user,
+            wp_bases, wp_public, name, current_admin_email() or get_certbot_email(), wp_user,
         )
         if wp_password:
             secrets = {**(secrets or {}), 'wp_admin_user': wp_user, 'wp_admin_password': wp_password}
+        if wp_password and template_key == 'wordpress-odin':
+            # Primera visita: el mu-plugin del kit activa Odin, WooCommerce, Yoast y Site Kit.
+            for base in wp_bases:
+                try:
+                    wp_sso._request(base, '/', wp_public, timeout=120)
+                    break
+                except OSError:  # incluye URLError
+                    continue
 
     panel_db.insert_project(
         PORTAL_ROOT, key, name, app_templates.TEMPLATES[template_key]['label'],
@@ -2355,13 +2422,12 @@ def admin_proxy_new():
         request.form.get('domain', ''),
         request.form.get('target_host', ''),
         request.form.get('target_port', ''),
+        extra_domains=request.form.get('extra_domains', ''),
     )
     if error:
         flash(error, 'error')
         return redirect(url_for('admin_proxy'))
-    ok, apply_error = proxy_control.apply_site(
-        PROXY_SITES_DIR, site['domain'], site['target_host'], site['target_port'], ssl_ready=False,
-    )
+    ok, apply_error = _publish_site(site)
     if ok:
         flash(f"Sitio {site['domain']} creado y activo por HTTP. Emite el SSL cuando el DNS apunte aquí.", 'success')
     else:
@@ -2379,18 +2445,37 @@ def admin_proxy_ssl(site_id):
     if not site['managed']:
         flash('Este sitio tiene un config personalizado; renueva su SSL manualmente.', 'error')
         return redirect(url_for('admin_proxy'))
-    cert_ok, cert_out = proxy_control.issue_certificate(site['domain'], get_certbot_email())
-    if not cert_ok:
-        flash(f"No se pudo emitir el certificado: {cert_out.strip()[-300:]}", 'error')
+    ok, msg = _issue_site_ssl(site)
+    flash(msg, 'success' if ok else 'error')
+    return redirect(url_for('admin_proxy'))
+
+
+@app.route('/admin/proxy/<int:site_id>/domains', methods=['POST'])
+def admin_proxy_domains(site_id):
+    if not get_admin_id():
+        return redirect(url_for('admin_login'))
+    site = panel_db.get_site(PORTAL_ROOT, site_id)
+    if not site:
+        abort(404)
+    if not site['managed']:
+        flash('Este sitio tiene un config personalizado; edita sus dominios a mano.', 'error')
         return redirect(url_for('admin_proxy'))
-    ok, apply_error = proxy_control.apply_site(
-        PROXY_SITES_DIR, site['domain'], site['target_host'], site['target_port'], ssl_ready=True,
+    extras, error = panel_db.parse_extra_domains(
+        PORTAL_ROOT, request.form.get('extra_domains', ''), site['domain'], exclude_site_id=site_id,
     )
-    if ok:
-        panel_db.set_site_ssl(PORTAL_ROOT, site_id, True)
-        flash(f"SSL activo para {site['domain']}.", 'success')
+    if error:
+        flash(error, 'error')
+        return redirect(url_for('admin_proxy'))
+    panel_db.set_site_extra_domains(PORTAL_ROOT, site_id, extras)
+    site = panel_db.get_site(PORTAL_ROOT, site_id)
+    panel_db.log_action(PORTAL_ROOT, current_admin_email(), 'site_domains', f"{site['domain']}: {', '.join(extras) or '-'}")
+    if site['ssl_enabled']:
+        # El certificado debe cubrir los nombres nuevos, así que se vuelve a emitir.
+        ok, msg = _issue_site_ssl(site)
     else:
-        flash(f'Certificado emitido, pero no se pudo activar en el proxy: {apply_error}', 'error')
+        ok, msg = _publish_site(site)
+        msg = 'Dominios actualizados. Emite el SSL cuando su DNS apunte aquí.' if ok else f'No se pudo aplicar: {msg}'
+    flash(msg, 'success' if ok else 'error')
     return redirect(url_for('admin_proxy'))
 
 
@@ -2535,8 +2620,84 @@ def admin_admins():
     gate = _require_admin()
     if gate:
         return gate
-    resp = make_response(render_template('admin_admins.html', admins=list_admins(PORTAL_ROOT)))
+    resp = make_response(render_template('admin_admins.html', admins=list_admins(PORTAL_ROOT), current_id=get_admin_id()))
     return _no_cache(resp)
+
+
+def _reauth_ok():
+    """Comprueba la contraseña (y el 2FA si está activo) del admin actual para acciones delicadas."""
+    email = current_admin_email()
+    admin, _ = authenticate(PORTAL_ROOT, email, request.form.get('password', ''))
+    ok = bool(admin) and admin['id'] == get_admin_id()
+    if ok and admin['totp_enabled']:
+        ok = verify_totp(PORTAL_ROOT, admin['id'], request.form.get('code', ''))
+    security.record_attempt(PORTAL_ROOT, g.client_ip, 'reauth', email, ok, request.headers.get('User-Agent', ''))
+    return ok
+
+
+@app.route('/admin/admins/<int:admin_id>/edit', methods=['GET', 'POST'])
+def admin_edit_admin(admin_id):
+    gate = _require_admin()
+    if gate:
+        return gate
+    target = get_admin_by_id(PORTAL_ROOT, admin_id)
+    if not target:
+        abort(404)
+    is_self = admin_id == get_admin_id()
+    error = None
+    if request.method == 'POST':
+        if not _reauth_ok():
+            error = 'Tu contraseña o código 2FA no son correctos. No se guardó ningún cambio.'
+        else:
+            new_password = request.form.get('new_password', '')
+            ok, error = update_admin(PORTAL_ROOT, admin_id, request.form.get('email', ''), new_password)
+            if ok:
+                changes = []
+                if normalize_email(request.form.get('email', '')) != target['email']:
+                    changes.append(f"correo {target['email']} → {normalize_email(request.form.get('email', ''))}")
+                if new_password:
+                    changes.append('contraseña')
+                if not is_self and target['totp_enabled'] and request.form.get('reset_2fa'):
+                    disable_totp(PORTAL_ROOT, admin_id)
+                    revoke_sessions(PORTAL_ROOT, admin_id)
+                    changes.append('2FA restablecido')
+                if is_self and new_password:
+                    # update_admin cerró todas tus sesiones; se renueva solo la actual.
+                    login_admin({'id': admin_id}, PORTAL_ROOT)
+                panel_db.log_action(
+                    PORTAL_ROOT, current_admin_email(), 'admin_updated',
+                    f"{target['email']}: {', '.join(changes) or 'sin cambios'}",
+                )
+                flash(f"Administrador {normalize_email(request.form.get('email', ''))} actualizado.", 'success')
+                return redirect(url_for('admin_admins'))
+        target = {**target, 'email': request.form.get('email', target['email'])}
+    _, my_totp = get_totp_state(PORTAL_ROOT, get_admin_id())
+    return _no_cache(make_response(render_template(
+        'admin_edit.html', target=target, is_self=is_self, error=error, totp_enabled=my_totp,
+    )))
+
+
+@app.route('/admin/admins/<int:admin_id>/delete', methods=['POST'])
+def admin_delete_admin(admin_id):
+    gate = _require_admin()
+    if gate:
+        return gate
+    target = get_admin_by_id(PORTAL_ROOT, admin_id)
+    if not target:
+        abort(404)
+    if admin_id == get_admin_id():
+        flash('No puedes eliminar tu propia cuenta. Pide a otro administrador que lo haga.', 'error')
+        return redirect(url_for('admin_edit_admin', admin_id=admin_id))
+    if not _reauth_ok():
+        flash('Tu contraseña o código 2FA no son correctos. El administrador no se eliminó.', 'error')
+        return redirect(url_for('admin_edit_admin', admin_id=admin_id))
+    ok, error = delete_admin(PORTAL_ROOT, admin_id)
+    if not ok:
+        flash(error, 'error')
+        return redirect(url_for('admin_admins'))
+    panel_db.log_action(PORTAL_ROOT, current_admin_email(), 'admin_deleted', target['email'])
+    flash(f"Administrador {target['email']} eliminado.", 'success')
+    return redirect(url_for('admin_admins'))
 
 
 @app.route('/admin/notifications', methods=['GET', 'POST'])
@@ -2670,12 +2831,7 @@ def admin_server_reboot():
         return gate
     # Reiniciar deja todo fuera de línea: se pide otra vez contraseña y 2FA.
     email = current_admin_email()
-    admin, _ = authenticate(PORTAL_ROOT, email, request.form.get('password', ''))
-    ok = bool(admin) and admin['id'] == get_admin_id()
-    if ok and admin['totp_enabled']:
-        ok = verify_totp(PORTAL_ROOT, admin['id'], request.form.get('code', ''))
-    security.record_attempt(PORTAL_ROOT, g.client_ip, 'reauth', email, ok, request.headers.get('User-Agent', ''))
-    if not ok:
+    if not _reauth_ok():
         flash('Contraseña o código incorrectos. El servidor no se reinició.', 'error')
         return redirect(url_for('admin_server'))
     done, message = sshadm_client.run('server_reboot', timeout=20)
@@ -2776,8 +2932,9 @@ def admin_change_password():
 
 @app.route('/admin/admins/new', methods=['GET', 'POST'])
 def admin_create_admin():
-    if not get_admin_id():
-        return redirect(url_for('admin_login'))
+    gate = _require_admin()
+    if gate:
+        return gate
     error = None
     if request.method == 'POST':
         email, error = create_admin(
@@ -2787,6 +2944,7 @@ def admin_create_admin():
             get_admin_id(),
         )
         if email:
+            panel_db.log_action(PORTAL_ROOT, current_admin_email(), 'admin_created', email)
             flash(f'Administrador {email} creado.', 'success')
             return redirect(url_for('admin_admins'))
     return render_template('admin_new.html', error=error)

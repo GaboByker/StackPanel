@@ -1,0 +1,30 @@
+{
+	"$schema": "https://schemas.wp.org/trunk/block.json",
+	"apiVersion": 3,
+	"name": "odin/slider",
+	"title": "Slider / Carrusel",
+	"category": "odin",
+	"icon": "slides",
+	"description": "Carrusel de diapositivas con cualquier contenido.",
+	"keywords": ["carrusel", "carousel", "slider", "galería"],
+	"textdomain": "odin-blocks",
+	"attributes": {
+		"perView": { "type": "number", "default": 1 },
+		"gap": { "type": "number", "default": 16 },
+		"autoplay": { "type": "boolean", "default": false },
+		"interval": { "type": "number", "default": 5 },
+		"arrows": { "type": "boolean", "default": true },
+		"dots": { "type": "boolean", "default": true },
+		"loop": { "type": "boolean", "default": true }
+	},
+	"supports": {
+		"html": false,
+		"align": ["wide", "full"],
+		"color": { "background": true, "text": true },
+		"spacing": { "padding": true, "margin": true }
+	},
+	"editorScript": "odin-blocks-editor",
+	"editorStyle": "odin-blocks-editor",
+	"viewScript": "file:./view.js",
+	"style": "file:./style.css"
+}

@@ -1,15 +1,25 @@
 """Apps de 1 clic. Cada plantilla crea su contenedor (o app + BD) con los datos en html/<slug>/."""
 import os
 import secrets
+import shutil
+import tempfile
 import time
+import urllib.request
+import zipfile
 
 import docker_control
 import docker_ops
+import proxy_control
 
 TEMPLATES = {
     'wordpress': {
         'label': 'WordPress',
         'description': 'Sitio WordPress con su propia base de datos MariaDB.',
+        'default_container_port': 80,
+    },
+    'wordpress-odin': {
+        'label': 'WordPress + Odin',
+        'description': 'WordPress con el editor visual Odin, WooCommerce, Yoast SEO y Site Kit ya activados, seguridad y caché listas. Sin contenido: solo la página de inicio por defecto.',
         'default_container_port': 80,
     },
     'static': {
@@ -65,12 +75,22 @@ def read_php_config(local_folder):
     return values
 
 
-def write_php_config(local_folder, values):
+def write_php_config(local_folder, values, extra_lines=None):
+    """Escribe los ajustes editables del panel. Las líneas que el panel no gestiona (p. ej. OPcache) se conservan."""
     path = _php_ini_local_path(local_folder)
     os.makedirs(os.path.dirname(path), exist_ok=True)
+    if extra_lines is None:
+        extra_lines = []
+        if os.path.isfile(path):
+            with open(path, encoding='utf-8') as fh:
+                for line in fh:
+                    line = line.rstrip('\n')
+                    key = line.split('=', 1)[0].strip()
+                    if line.strip() and not (('=' in line) and key in DEFAULT_PHP_CONFIG):
+                        extra_lines.append(line)
     lines = [f'{key} = {(values.get(key) or "").strip() or default}' for key, default in DEFAULT_PHP_CONFIG.items()]
     with open(path, 'w', encoding='utf-8') as fh:
-        fh.write('\n'.join(lines) + '\n')
+        fh.write('\n'.join(lines + list(extra_lines)) + '\n')
 
 
 def ensure_php_override_mount(app_container, local_folder, host_folder):
@@ -135,6 +155,7 @@ def install(template, slug, local_folder, host_folder, port, saved_secrets=None)
     reinstalar o restaurar, para que la app use las mismas credenciales que los datos."""
     fn = {
         'wordpress': _install_wordpress,
+        'wordpress-odin': _install_wordpress_odin,
         'static': _install_static,
         'flask': _install_flask,
         'node': _install_node,
@@ -144,7 +165,7 @@ def install(template, slug, local_folder, host_folder, port, saved_secrets=None)
     return fn(slug, local_folder, host_folder, port, saved_secrets or {})
 
 
-def _install_wordpress(slug, local_folder, host_folder, port, saved_secrets):
+def _install_wordpress(slug, local_folder, host_folder, port, saved_secrets, php_extra=None):
     network = f'{slug}-net'
     db_container = f'{slug}-db'
     app_container = f'{slug}-app'
@@ -186,7 +207,7 @@ def _install_wordpress(slug, local_folder, host_folder, port, saved_secrets):
     if not _wait_mysql_ready(db_container):
         return None, None, None, 'MariaDB no respondió a tiempo al iniciar. Intenta instalar de nuevo.'
 
-    write_php_config(local_folder, DEFAULT_PHP_CONFIG)
+    write_php_config(local_folder, DEFAULT_PHP_CONFIG, extra_lines=php_extra or [])
 
     _, err = docker_ops.create_container(
         app_container, wp_image,
@@ -210,6 +231,69 @@ def _install_wordpress(slug, local_folder, host_folder, port, saved_secrets):
     docker_ops.connect_network(network, os.environ.get('HOSTNAME'))
 
     return [db_container, app_container], [], secrets_out, None
+
+
+# Kit de «WordPress + Odin»: plugin Odin Blocks + mu-plugins (seguridad y configuración inicial).
+ODIN_KIT_DIR = os.environ.get('ODIN_KIT_DIR', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'wp-kits', 'odin'))
+ODIN_WPORG_PLUGINS = ['woocommerce', 'wordpress-seo', 'google-site-kit']
+ODIN_PHP_EXTRA = [
+    '; Odin: WordPress + WooCommerce cargan >11.000 archivos PHP',
+    'opcache.memory_consumption = 256',
+    'opcache.interned_strings_buffer = 16',
+    'opcache.max_accelerated_files = 20000',
+    'opcache.revalidate_freq = 60',
+    'realpath_cache_size = 4096K',
+    'realpath_cache_ttl = 600',
+]
+WWW_DATA = 33  # uid/gid de www-data en la imagen oficial de WordPress (para que pueda actualizar plugins)
+
+
+def _download_wporg_plugin(slug, plugins_dir):
+    """Descarga la última versión estable desde wordpress.org. Devuelve un aviso si falla (el sitio funciona igual)."""
+    url = f'https://downloads.wordpress.org/plugin/{slug}.latest-stable.zip'
+    try:
+        with tempfile.NamedTemporaryFile(suffix='.zip') as tmp:
+            with urllib.request.urlopen(url, timeout=120) as resp:
+                shutil.copyfileobj(resp, tmp)
+            tmp.flush()
+            with zipfile.ZipFile(tmp.name) as zf:
+                root = os.path.realpath(plugins_dir)
+                for member in zf.namelist():
+                    if not os.path.realpath(os.path.join(root, member)).startswith(root + os.sep):
+                        return f'{slug}: zip con rutas no válidas'
+                zf.extractall(plugins_dir)
+    except (OSError, zipfile.BadZipFile) as exc:
+        return f'{slug}: {exc}'
+    return None
+
+
+def _chown_tree(path, uid, gid):
+    for root, dirs, files in os.walk(path):
+        for name in dirs + files:
+            os.lchown(os.path.join(root, name), uid, gid)
+    os.lchown(path, uid, gid)
+
+
+def _install_wordpress_odin(slug, local_folder, host_folder, port, saved_secrets):
+    """WordPress normal + wp-content preparado: Odin, WooCommerce, Yoast, Site Kit y mu-plugins.
+    Los plugins se activan solos en el primer arranque (mu-plugin odin-kit-setup.php)."""
+    wp_content = os.path.join(local_folder, 'wp-content')
+    plugins_dir = os.path.join(wp_content, 'plugins')
+    os.makedirs(plugins_dir, exist_ok=True)
+    if not os.path.isdir(os.path.join(ODIN_KIT_DIR, 'plugins', 'odin-blocks')):
+        return None, None, None, f'No se encontró el kit de Odin en {ODIN_KIT_DIR}.'
+    shutil.copytree(os.path.join(ODIN_KIT_DIR, 'plugins'), plugins_dir, dirs_exist_ok=True)
+    shutil.copytree(os.path.join(ODIN_KIT_DIR, 'mu-plugins'), os.path.join(wp_content, 'mu-plugins'), dirs_exist_ok=True)
+    for plugin in ODIN_WPORG_PLUGINS:
+        if not os.path.isdir(os.path.join(plugins_dir, plugin)):
+            warning = _download_wporg_plugin(plugin, plugins_dir)
+            if warning:
+                print(f'[wordpress-odin] aviso al descargar {warning}', flush=True)
+    # Clave con la que el proxy le anuncia su dominio (mu-plugin stackpanel-domain.php)
+    with open(os.path.join(wp_content, 'stackpanel-key.php'), 'w', encoding='utf-8') as fh:
+        fh.write(f"<?php return '{proxy_control.site_key(port)}';\n")
+    _chown_tree(wp_content, WWW_DATA, WWW_DATA)
+    return _install_wordpress(slug, local_folder, host_folder, port, saved_secrets, php_extra=ODIN_PHP_EXTRA)
 
 
 def _install_static(slug, local_folder, host_folder, port, saved_secrets):

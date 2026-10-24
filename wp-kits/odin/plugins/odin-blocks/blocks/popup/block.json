@@ -1,0 +1,32 @@
+{
+	"$schema": "https://schemas.wp.org/trunk/block.json",
+	"apiVersion": 3,
+	"name": "odin/popup",
+	"title": "Popup",
+	"category": "odin",
+	"icon": "external",
+	"description": "Ventana emergente con disparador: al cargar, al hacer scroll, al intentar salir o al hacer clic en un enlace.",
+	"keywords": ["modal", "ventana", "popup"],
+	"textdomain": "odin-blocks",
+	"attributes": {
+		"popupId": { "type": "string", "default": "" },
+		"trigger": { "type": "string", "default": "load" },
+		"delay": { "type": "number", "default": 3 },
+		"scroll": { "type": "number", "default": 50 },
+		"anchor": { "type": "string", "default": "" },
+		"frequency": { "type": "string", "default": "session" },
+		"days": { "type": "number", "default": 7 },
+		"width": { "type": "number", "default": 560 }
+	},
+	"supports": {
+		"html": false,
+		"anchor": false,
+		"color": { "background": true, "text": true },
+		"spacing": { "padding": true, "blockGap": true },
+		"__experimentalBorder": { "radius": true, "width": true, "color": true }
+	},
+	"editorScript": "odin-blocks-editor",
+	"editorStyle": "odin-blocks-editor",
+	"viewScript": "file:./view.js",
+	"style": "file:./style.css"
+}

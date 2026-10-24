@@ -1,0 +1,31 @@
+{
+	"$schema": "https://schemas.wp.org/trunk/block.json",
+	"apiVersion": 3,
+	"name": "odin/form",
+	"title": "Formulario",
+	"category": "odin",
+	"icon": "feedback",
+	"description": "Formulario con envío por email, guardado de envíos y antispam.",
+	"keywords": ["contacto", "form", "email"],
+	"textdomain": "odin-blocks",
+	"attributes": {
+		"formId": { "type": "string", "default": "" },
+		"recipient": { "type": "string", "default": "" },
+		"subject": { "type": "string", "default": "Nuevo mensaje desde la web" },
+		"submitLabel": { "type": "string", "default": "Enviar" },
+		"successMessage": { "type": "string", "default": "¡Gracias! Hemos recibido tu mensaje." },
+		"errorMessage": { "type": "string", "default": "No se pudo enviar. Revisa los campos e inténtalo de nuevo." }
+	},
+	"supports": {
+		"html": false,
+		"anchor": false,
+		"align": ["wide", "full"],
+		"color": { "background": true, "text": true },
+		"spacing": { "padding": true, "margin": true, "blockGap": true },
+		"typography": { "fontSize": true },
+		"__experimentalBorder": { "radius": true, "width": true, "color": true }
+	},
+	"editorScript": "odin-blocks-editor",
+	"editorStyle": "odin-blocks-editor",
+	"style": "file:./style.css"
+}

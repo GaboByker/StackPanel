@@ -1,0 +1,6 @@
+.odin-popup{width:min(var(--odin-popup-w),calc(100vw - 2rem));max-height:calc(100dvh - 2rem);box-sizing:border-box;border:0;border-radius:12px;padding:2rem;background:var(--wp--preset--color--base,#fff);color:inherit;box-shadow:0 20px 60px rgba(0,0,0,.3)}
+.odin-popup::backdrop{background:rgba(0,0,0,.55)}
+.odin-popup[open]{animation:odin-pop .2s ease-out}
+.odin-popup__close{position:absolute;top:.5rem;right:.6rem;border:0;background:none;color:inherit;font-size:1.75rem;line-height:1;cursor:pointer;padding:.25rem .5rem}
+@keyframes odin-pop{from{opacity:0;transform:translateY(12px)}}
+@media (prefers-reduced-motion:reduce){.odin-popup[open]{animation:none}}

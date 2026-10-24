@@ -1,0 +1,15 @@
+#odin-canvas{min-height:60vh}
+#odin-canvas [data-odn]{outline-offset:-1px}
+#odin-canvas .odn-ui-hover{outline:1px dashed #7c3aed}
+#odin-canvas .odn-ui-selected{outline:2px solid #7c3aed!important}
+#odin-canvas .odn-container:empty{min-height:90px;outline:1px dashed #a7aaad;background:repeating-linear-gradient(45deg,transparent,transparent 8px,rgba(0,0,0,.02) 8px,rgba(0,0,0,.02) 16px)}
+.odn-placeholder{display:flex;align-items:center;justify-content:center;min-height:120px;background:#f0f0f1;color:#50575e;border:1px dashed #a7aaad;border-radius:4px;font:14px/1.4 system-ui,sans-serif}
+.odn-ui-empty{display:flex;align-items:center;justify-content:center;min-height:240px;border:2px dashed #a7aaad;border-radius:8px;color:#50575e;font:15px system-ui,sans-serif}
+.odn-ui-bar{position:absolute;z-index:99999;display:none;align-items:center;gap:1px;height:24px;background:#7c3aed;border-radius:3px 3px 0 0;font:12px/24px system-ui,sans-serif}
+.odn-ui-bar span{color:#fff;padding:0 8px}
+.odn-ui-bar button{all:unset;display:inline-flex;align-items:center;justify-content:center;width:26px;height:24px;color:#fff;cursor:pointer}.odn-ui-bar button:focus-visible{outline:2px solid #fff;outline-offset:-2px}
+.odn-ui-bar button:hover{background:#6d28d9}
+.odn-ui-bar [data-act=drag]{cursor:grab}
+.odn-ui-marker{background:#7c3aed;height:4px;border-radius:2px;margin:-2px 0;pointer-events:none;flex:0 0 100%;align-self:stretch}
+.odn-ui-marker.is-vertical{width:4px;height:auto;min-height:40px;flex:0 0 4px;margin:0 -2px}
+.odn-ui-marker.is-inside{height:auto;min-height:40px;margin:0;background:rgba(124,58,237,.12);outline:2px dashed #7c3aed;flex:1 1 auto}

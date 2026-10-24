@@ -1,0 +1,10 @@
+.odin-anim-ready .odin-anim{transition:opacity .7s ease,transform .7s ease;transition-delay:var(--odin-delay,0ms)}
+.odin-anim-ready .odin-anim:not(.is-visible){opacity:0}
+.odin-anim-ready .odin-anim--fade-up:not(.is-visible){transform:translateY(32px)}
+.odin-anim-ready .odin-anim--fade-down:not(.is-visible){transform:translateY(-32px)}
+.odin-anim-ready .odin-anim--fade-left:not(.is-visible){transform:translateX(32px)}
+.odin-anim-ready .odin-anim--fade-right:not(.is-visible){transform:translateX(-32px)}
+.odin-anim-ready .odin-anim--zoom:not(.is-visible){transform:scale(.92)}
+@media (max-width:600px){.odin-hide-mobile{display:none!important}}
+@media (min-width:601px) and (max-width:1024px){.odin-hide-tablet{display:none!important}}
+@media (min-width:1025px){.odin-hide-desktop{display:none!important}}

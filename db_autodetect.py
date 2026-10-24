@@ -24,6 +24,7 @@ _TEMPLATE_CONVENTIONS = {
         'dbname': 'wordpress',
     },
 }
+_TEMPLATE_CONVENTIONS['wordpress-odin'] = _TEMPLATE_CONVENTIONS['wordpress']
 
 
 def detect_from_template(project):
