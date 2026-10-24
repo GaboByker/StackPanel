@@ -270,14 +270,21 @@ def _clear_session_cookie(response):
 
 def load_projects():
     projects = []
+    # Un sitio del proxy que apunta al puerto del proyecto le da su dominio público.
+    sites = panel_db.list_sites(PORTAL_ROOT)
     for item in panel_db.list_projects_raw(PORTAL_ROOT):
         path = item.get('path') or '/'
         if not path.startswith('/'):
             path = '/' + path
         suffix = '' if path == '/' else path
 
+        site = next((s for s in sites if s.get('notes') == f"project:{item['id']}"), None) \
+            or next((s for s in sites if item.get('port') and s.get('target_port') == item.get('port')), None)
         if item.get('access_mode') == 'domain' and item.get('domain'):
             base = f"https://{item['domain']}"
+        elif site:
+            item['domain'] = site['domain']
+            base = f"{'https' if site.get('ssl_enabled') else 'http'}://{site['domain']}"
         else:
             base = f"http://{get_public_host()}:{item.get('port')}"
         url = base + suffix
