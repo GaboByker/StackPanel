@@ -23,6 +23,7 @@ RULES = {
     'sec_ban_minutes': (30, 1, 525600),       # duración del primer bloqueo
     'sec_ban_multiplier': (2, 1, 10),         # cada reincidencia multiplica la duración
     'sec_ban_max_minutes': (10080, 1, 525600),  # techo del bloqueo automático (7 días)
+    'sec_ban_permanent_after': (5, 0, 100),   # el N.º bloqueo en 30 días es permanente (0 = nunca)
     'sec_account_max_failures': (10, 1, 1000),  # fallos por cuenta (desde cualquier IP)
     'sec_session_hours': (12, 1, 168),        # vida máxima de una sesión
     'sec_idle_minutes': (60, 5, 10080),       # cierre por inactividad
@@ -411,12 +412,17 @@ def _auto_ban_minutes(root, ip, rules):
 
 
 def recidive_minutes(base, previous, rules):
-    """Duración de un bloqueo automático tras `previous` bloqueos de la misma IP (misma fórmula que guard/detector.py)."""
+    """Duración de un bloqueo automático tras `previous` bloqueos de la misma IP (misma fórmula que guard/detector.py).
+    None = permanente."""
+    if 0 < rules.get('sec_ban_permanent_after', 0) <= previous + 1:
+        return None
     return min(base * (max(1, rules['sec_ban_multiplier']) ** previous),
                max(base, rules['sec_ban_max_minutes']))
 
 
 def human_minutes(minutes):
+    if minutes is None:
+        return 'permanente'
     if minutes >= 1440:
         return f'{minutes // 1440} d' if minutes % 1440 == 0 else f'{minutes / 1440:.1f} d'
     if minutes >= 120:
@@ -432,7 +438,7 @@ def recidive_examples(rules, jails):
     for label, base, mode in services:
         steps = [recidive_minutes(base, n, rules) for n in range(5)]
         cap = max(base, rules['sec_ban_max_minutes'])
-        reached = next((i + 1 for i, m in enumerate(steps) if m >= cap), None)
+        reached = next((i + 1 for i, m in enumerate(steps) if m is None or m >= cap), None)
         rows.append({
             'label': label, 'mode': mode, 'steps': [human_minutes(m) for m in steps],
             'cap': human_minutes(cap), 'reached': reached,
@@ -469,13 +475,13 @@ def record_attempt(root, ip, kind, email, success, user_agent=''):
     if previous:
         reason += f' (reincidencia #{previous + 1})'
     cidr, _ = ban(root, ip, minutes, reason, 'auto')
-    panel_db.log_action(root, None, 'ip_banned_auto', f'{cidr} · {minutes} min · {reason}')
+    panel_db.log_action(root, None, 'ip_banned_auto', f'{cidr} · {human_minutes(minutes)} · {reason}')
     with _connect(root) as conn:
         conn.execute('UPDATE ip_bans SET notified = 1 WHERE cidr = ? AND notified = 0', (cidr,))
     try:
         notification_control.notify(
             root, 'security_ban', 'Panel: IP bloqueada',
-            f'Se bloqueó {cidr} durante {minutes} min ({reason}).',
+            f'Se bloqueó {cidr}: {human_minutes(minutes)} ({reason}).',
         )
     except Exception:
         pass

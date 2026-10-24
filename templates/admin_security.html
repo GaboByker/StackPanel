@@ -403,7 +403,7 @@
 
 	<article class="admin-service-card" id="reincidencia" style="margin-bottom:16px;">
 		<div class="admin-service-head"><h3>Reincidencia (todos los servicios)</h3></div>
-		<p class="admin-hint" style="margin:0 0 12px;">Si una IP vuelve a ser bloqueada en 30 días, el bloqueo se multiplica por este valor (hasta el máximo).</p>
+		<p class="admin-hint" style="margin:0 0 12px;">Si una IP vuelve a ser bloqueada en 30 días, el bloqueo se multiplica por este valor (hasta el máximo). Desde el bloqueo indicado pasa a ser permanente (0 = nunca).</p>
 		<div class="form-row">
 			<div class="field">
 				<label for="r-mult">Multiplicador por reincidencia</label>
@@ -412,6 +412,10 @@
 			<div class="field">
 				<label for="r-banmax">Bloqueo automático máximo (minutos)</label>
 				<input type="number" id="r-banmax" name="sec_ban_max_minutes" min="1" max="525600" value="{{ rules.sec_ban_max_minutes }}" required/>
+			</div>
+			<div class="field">
+				<label for="r-perm">Bloqueo permanente desde la vez n.º</label>
+				<input type="number" id="r-perm" name="sec_ban_permanent_after" min="0" max="100" value="{{ rules.sec_ban_permanent_after }}" required/>
 			</div>
 		</div>
 		<p class="admin-hint" style="margin:0 0 8px;">Máximo actual: {{ recidive_max }}.</p>
@@ -422,7 +426,7 @@
 					{% for r in recidive %}
 					<tr>
 						<td>{{ r.label }}{% if r.mode != 'ban' %}<br/><small class="admin-hint">{{ 'apagado' if r.mode == 'off' else 'solo observa: hoy no bloquea' }}</small>{% endif %}</td>
-						{% for step in r.steps %}<td>{% if r.reached and loop.index >= r.reached %}<strong>{{ step }}</strong>{% if loop.index == r.reached %} <small class="admin-hint">(máx.)</small>{% endif %}{% else %}{{ step }}{% endif %}</td>{% endfor %}
+						{% for step in r.steps %}<td>{% if r.reached and loop.index >= r.reached %}<strong>{{ step }}</strong>{% if loop.index == r.reached and step != 'permanente' %} <small class="admin-hint">(máx.)</small>{% endif %}{% else %}{{ step }}{% endif %}</td>{% endfor %}
 					</tr>
 					{% endfor %}
 				</tbody>

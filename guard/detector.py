@@ -28,7 +28,7 @@ JAIL_DEFAULTS = {
     # max_failures = conexiones nuevas por IP en la ventana. Un puerto en "solo escuchar" nunca bloquea.
     'ports': {'mode': 'ban', 'max_failures': 60, 'window_minutes': 1, 'ban_minutes': 60},
 }
-GLOBAL_DEFAULTS = {'sec_ban_multiplier': 2, 'sec_ban_max_minutes': 10080}
+GLOBAL_DEFAULTS = {'sec_ban_multiplier': 2, 'sec_ban_max_minutes': 10080, 'sec_ban_permanent_after': 5}
 RECIDIVE_LOOKBACK_DAYS = 30
 STATE_FILE = '/var/lib/stackpanel-guard/state.json'
 DOCKER = '/usr/bin/docker'
@@ -121,7 +121,7 @@ def load_jails(conn):
     jails = {k: dict(v) for k, v in JAIL_DEFAULTS.items()}
     globals_ = dict(GLOBAL_DEFAULTS)
     rows = conn.execute(
-        "SELECT key, value FROM settings WHERE key IN ('sec_jails', 'sec_ban_multiplier', 'sec_ban_max_minutes')"
+        "SELECT key, value FROM settings WHERE key IN ('sec_jails', 'sec_ban_multiplier', 'sec_ban_max_minutes', 'sec_ban_permanent_after')"
     ).fetchall()
     for key, value in rows:
         if key == 'sec_jails':
@@ -436,22 +436,29 @@ class Detector:
                     "SELECT COUNT(*) FROM ip_bans WHERE cidr = ? AND source = 'auto' AND created_at > ?",
                     (cidr, since),
                 ).fetchone()[0]
-                minutes = min(
-                    conf['ban_minutes'] * (max(1, self.globals['sec_ban_multiplier']) ** previous),
-                    max(conf['ban_minutes'], self.globals['sec_ban_max_minutes']),
-                )
+                # Misma fórmula que security.recidive_minutes; None = permanente.
+                permanent_after = self.globals['sec_ban_permanent_after']
+                if 0 < permanent_after <= previous + 1:
+                    minutes = None
+                else:
+                    minutes = min(
+                        conf['ban_minutes'] * (max(1, self.globals['sec_ban_multiplier']) ** previous),
+                        max(conf['ban_minutes'], self.globals['sec_ban_max_minutes']),
+                    )
                 if previous:
                     reason += f' (reincidencia #{previous + 1})'
+                expires = (now + timedelta(minutes=minutes)).isoformat() if minutes else None
+                duration = f'{minutes} min' if minutes else 'permanente'
                 conn.execute(
                     'INSERT INTO ip_bans (cidr, service, source, reason, created_at, expires_at, created_by) '
                     "VALUES (?, ?, 'auto', ?, ?, ?, 'stackpanel-guard')",
-                    (cidr, jail, reason, now.isoformat(), (now + timedelta(minutes=minutes)).isoformat()),
+                    (cidr, jail, reason, now.isoformat(), expires),
                 )
                 conn.execute(
                     'INSERT INTO audit_log (ts, admin_email, action, detail) VALUES (?, NULL, ?, ?)',
-                    (now.isoformat(), 'ip_banned_auto', f'{cidr} · {minutes} min · {jail}: {reason}'),
+                    (now.isoformat(), 'ip_banned_auto', f'{cidr} · {duration} · {jail}: {reason}'),
                 )
-                log.info('bloqueo %s: %s durante %s min (%s)', jail, cidr, minutes, reason)
+                log.info('bloqueo %s: %s %s (%s)', jail, cidr, duration, reason)
                 new_ban = True
             conn.commit()
         except sqlite3.Error:
