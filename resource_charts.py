@@ -13,7 +13,7 @@ RANGES = {
     '7d': (168, 60),
 }
 DEFAULT_RANGE = '24h'
-TOP_PROJECTS = 5   # el resto se agrupa en "Otros"
+TOP_PROJECTS = 8   # uno por color de la paleta; el resto se agrupa en "Otros"
 
 
 def _parse(ts):
@@ -85,11 +85,13 @@ def build(root, range_key):
         per_mem.setdefault(key, [0] * n)[i] += row['memory_bytes'] or 0
 
     # El color depende del uso de memoria de 7 días, para que no cambie al cambiar de rango.
-    week_mem = {}
+    # Promedio por muestra, no suma: un proyecto nuevo y pesado no debe quedar tras uno viejo y liviano.
+    week_mem, week_n = {}, {}
     for row in (project_rows if hours == 168 else panel_db.list_project_metrics_history(root, hours=168)):
         week_mem[row['project_key']] = week_mem.get(row['project_key'], 0) + (row['memory_bytes'] or 0)
-    ranked = sorted(week_mem, key=week_mem.get, reverse=True)
-    top = [k for k in ranked if k in labels][:TOP_PROJECTS]
+        week_n[row['project_key']] = week_n.get(row['project_key'], 0) + 1
+    ranked = sorted(week_mem, key=lambda k: week_mem[k] / week_n[k], reverse=True)
+    top = [k for k in ranked[:TOP_PROJECTS] if k in labels]
     rest = [k for k in labels if k not in top]
 
     def series_values(per, k, digits):
@@ -107,7 +109,7 @@ def build(root, range_key):
             out.append(_round(sum(per[k][i] for k in rest) / len(samples_in[i]), digits))
         return out
 
-    # Slot de color = puesto en el ranking semanal (1..5); "Otros" va en gris (0).
+    # Slot de color = puesto en el ranking semanal (1..8); "Otros" va en gris (0).
     projects = [{'key': k, 'label': labels[k], 'slot': ranked.index(k) + 1} for k in top]
     project_cpu = {k: series_values(per_cpu, k, 2) for k in top}
     project_mem = {k: series_values(per_mem, k, 0) for k in top}
