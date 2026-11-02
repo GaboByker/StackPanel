@@ -1715,6 +1715,15 @@ def _project_owning_subpath(subpath):
     return None
 
 
+def _folder_compose_containers(dir_name):
+    """Contenedores de compose de html/<dir_name> (solo carpetas de primer nivel)."""
+    dir_name = (dir_name or '').strip('/')
+    if not dir_name or '/' in dir_name:
+        return []
+    all_containers, err = list_all_containers()
+    return [] if err else project_scan.folder_containers(dir_name, all_containers)
+
+
 def _stop_project_if_running(subpath):
     """Detiene los contenedores del proyecto dueño de subpath antes de una operación destructiva."""
     project = _project_owning_subpath(subpath)
@@ -1749,6 +1758,22 @@ def admin_files_delete(subpath):
         flash(err, 'error')
         return redirect(url_for('admin_files', subpath=files_control.parent_of(subpath)))
 
+    if is_dir:
+        # Al borrar la carpeta raíz de un proyecto, sus contenedores quedarían huérfanos.
+        owner = _project_owning_subpath(subpath)
+        owned = owner and (owner.get('folder') or '')[5:].strip('/') == subpath.strip('/')
+        containers = sorted(set(_folder_compose_containers(subpath))
+                            | set(panel_db.project_containers(owner) if owned else []))
+        if containers:
+            images, networks = project_leftovers(containers)
+            ok, msg = remove_containers(containers)
+            if not ok:
+                flash(f'No se pudieron eliminar los contenedores de la carpeta: {msg}', 'error')
+                return redirect(url_for('admin_files', subpath=files_control.parent_of(subpath)))
+            remove_leftovers(images, networks)
+            if owned:
+                panel_db.set_containers(PORTAL_ROOT, owner['id'], [])
+
     try:
         if is_dir:
             files_control.delete_dir(STACK_ROOT, subpath)
@@ -1772,9 +1797,10 @@ def admin_project_wipe(project_id):
     if not project:
         abort(404)
 
-    containers = panel_db.project_containers(project)
-    volumes = panel_db.project_volumes(project)
     folder = project.get('folder') or ''
+    # Incluye servicios de compose creados después de registrar el proyecto.
+    containers = sorted(set(panel_db.project_containers(project)) | set(_folder_compose_containers(folder[5:] if folder.startswith('html/') else '')))
+    volumes = panel_db.project_volumes(project)
     images, networks = project_leftovers(containers)
 
     if containers:

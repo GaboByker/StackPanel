@@ -20,6 +20,17 @@ def match_containers(dir_name, containers):
     ]
 
 
+def folder_containers(dir_name, containers):
+    """Contenedores creados por compose dentro de html/<dir_name>; sin prefijo de nombre para no tocar otros proyectos."""
+    compose_project = _compose_project_name(dir_name)
+    suffix = f'/html/{dir_name}'
+    return sorted({
+        c['name'] for c in containers
+        if c['labels'].get('com.docker.compose.project') == compose_project
+        or (c['labels'].get('com.docker.compose.project.working_dir') or '').rstrip('/').endswith(suffix)
+    })
+
+
 def scan_candidates(stack_root, registered_folders):
     html_root = os.path.join(stack_root, 'html')
     if not os.path.isdir(html_root):
